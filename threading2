@@ -1,0 +1,13 @@
+&+- # Fork thread
+[+-> # Thread 0, with starting +- for moving thread 1
+  ++++ Inline comment ++++.
+<]
+[
+  &+-
+  [+->> # Thread 1
+    >>>>><<<<<++.
+  <<]
+  [>>> # Thread 2
+    ++++[-.]
+  <<<[-]]
+]
