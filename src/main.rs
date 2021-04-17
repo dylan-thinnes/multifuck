@@ -49,8 +49,6 @@ struct Opt {
 fn main () -> io::Result<()> {
     let opt = Opt::from_args();
 
-    //let stdin = io::stdin();
-
     let f = File::open(opt.input)?;
     let input_program = Box::new(BufReader::new(f));
 
@@ -64,87 +62,110 @@ fn main () -> io::Result<()> {
         outputs: vec![]
     };
 
-    let source_content = TextContent::new("");
-    let output_stream_content = TextContent::new("");
-    let memory_content = TextContent::new("");
+    if !opt.debug {
+        let mut output_idx = 0;
+        while state.step() {
+            for (thread_id, line) in state.outputs[output_idx..].iter() {
+                println!("<{}>: {}", thread_id, line);
+            }
+            output_idx = state.outputs.len();
+        }
+    } else {
+        let source_content = TextContent::new("");
+        let output_stream_content = TextContent::new("");
+        let memory_content = TextContent::new("");
 
-    let mut siv = cursive::default();
-    siv.add_fullscreen_layer(
-        LinearLayout::horizontal()
-        .child(
-            Panel::new(TextView::new_with_content(source_content.clone()))
-            .title("Source")
-            .percent_size(XY { x: (0.0, 0.5), y: (0.0, 1.0) })
-        )
-        .child(
-            LinearLayout::vertical()
+        let mut siv = cursive::default();
+        siv.add_fullscreen_layer(
+            LinearLayout::horizontal()
             .child(
-                Panel::new(
-                    TextView::new_with_content(output_stream_content.clone())
-                    .scrollable()
-                    .scroll_strategy(ScrollStrategy::StickToBottom)
+                Panel::new(TextView::new_with_content(source_content.clone()))
+                .title("Source")
+                .percent_width((0.0, 0.5))
+            )
+            .child(
+                LinearLayout::vertical()
+                .child(
+                    LinearLayout::horizontal()
+                    .child(
+                        Panel::new(
+                            TextView::new_with_content(output_stream_content.clone())
+                            .scrollable()
+                            .scroll_strategy(ScrollStrategy::StickToBottom)
+                        )
+                        .title("Output")
+                        .percent_width((0.0, 0.5))
+                    )
+                    .child(
+                        Panel::new(
+                            TextView::new_with_content(output_stream_content.clone())
+                            .scrollable()
+                            .scroll_strategy(ScrollStrategy::StickToBottom)
+                        )
+                        .title("Input")
+                        .percent_width((0.5, 1.0))
+                    )
+                    .percent_height((0.0, 0.5))
                 )
-                .title("Output")
-                .percent_size(XY { x: (0.0, 1.0), y: (0.0, 0.5) })
+                .child(
+                    Panel::new(TextView::new_with_content(memory_content.clone()))
+                    .title("Memory")
+                    .percent_height((0.5, 1.0))
+                )
+                .percent_width((0.5, 1.0))
             )
-            .child(
-                Panel::new(TextView::new_with_content(memory_content.clone()))
-                .title("Memory")
-                .percent_size(XY { x: (0.0, 1.0), y: (0.5, 1.0) })
-            )
-            .percent_size(XY { x: (0.5, 1.0), y: (0.0, 1.0) })
-        )
-    );
+        );
 
-    let cb_sink = siv.cb_sink().clone();
-    let (tx, rx) = mpsc::channel::<UICommand>();
+        let cb_sink = siv.cb_sink().clone();
+        let (tx, rx) = mpsc::channel::<UICommand>();
 
-    let exit_sender = tx.clone();
-    let step_sender = tx.clone();
+        let exit_sender = tx.clone();
+        let step_sender = tx.clone();
 
-    siv.add_global_callback('q', move |s| {
-        s.quit();
-        if exit_sender.send(UICommand::Exit).is_err() {
-            return;
-        }
-    });
+        siv.add_global_callback('q', move |s| {
+            s.quit();
+            if exit_sender.send(UICommand::Exit).is_err() {
+                return;
+            }
+        });
 
-    siv.add_global_callback(' ', move |_| {
-        if step_sender.send(UICommand::Step).is_err() {
-            return;
-        }
-        if step_sender.send(UICommand::Repaint).is_err() {
-            return;
-        }
-    });
+        siv.add_global_callback(' ', move |_| {
+            if step_sender.send(UICommand::Step).is_err() {
+                return;
+            }
+            if step_sender.send(UICommand::Repaint).is_err() {
+                return;
+            }
+        });
 
-    let handle = thread::spawn(move || {
-        'outer: loop {
-            while let Ok(ui_command) = rx.recv() {
-                match ui_command {
-                    UICommand::Repaint => {
-                        source_content.set_content(state.spanned_tape());
-                        output_stream_content.set_content(state.output_log());
-                        memory_content.set_content(format!["{:?}", state.memory]);
-                        cb_sink.send(Box::new(Cursive::noop)).unwrap();
-                    },
-                    UICommand::Step => {
-                        if !state.step() {
+        let handle = thread::spawn(move || {
+            'outer: loop {
+                while let Ok(ui_command) = rx.recv() {
+                    match ui_command {
+                        UICommand::Repaint => {
+                            source_content.set_content(state.spanned_tape());
+                            output_stream_content.set_content(state.output_log());
+                            memory_content.set_content(format!["{:?}", state.memory]);
+                            cb_sink.send(Box::new(Cursive::noop)).unwrap();
+                        },
+                        UICommand::Step => {
+                            if !state.step() {
+                                break 'outer;
+                            }
+                        },
+                        UICommand::Exit => {
                             break 'outer;
-                        }
-                    },
-                    UICommand::Exit => {
-                        break 'outer;
-                    },
+                        },
+                    }
                 }
             }
-        }
-    });
+        });
 
-    tx.send(UICommand::Repaint);
-    siv.run();
+        tx.send(UICommand::Repaint);
+        siv.run();
 
-    handle.join();
+        handle.join();
+    }
 
     //while state.step() {}
     //println!("{:?}", state);
@@ -209,7 +230,7 @@ impl State {
 
         for (thread_id, line) in &self.outputs {
             span.append_styled(
-                format!["<thread {}>", thread_id],
+                format!["<{}>", thread_id],
                 ColorStyle::secondary());
             span.append_plain(": ");
             span.append_plain(line);
@@ -304,20 +325,36 @@ impl Tape {
             let mut char_stream = line.chars().enumerate().peekable();
             let mut lexeme_bounds = vec![];
 
-            for (col_no, c) in char_stream {
+            while let Some((col_no, c)) = char_stream.next() {
                 if c == '#' { break; }
                 if let Some(instr) = Instr::parse(c) {
-                    lexeme_bounds.push(LexemeSpan {
-                        start_col: col_no,
-                        end_col: col_no + 1
-                    });
+                    let start_col = col_no;
+                    let mut repetition = None;
+                    let mut end_col = start_col + 1;
 
+                    if let Some((_, peeked_char)) = char_stream.peek() {
+                        if *peeked_char == '{' {
+                            char_stream.next();
+
+                            let mut total_value = 0;
+                            end_col += 1;
+                            while let Some((_, num_c @ '0'..='9')) = char_stream.peek() {
+                                end_col += 1;
+                                total_value *= 10;
+                                total_value += num_c.to_digit(10).unwrap();
+                                char_stream.next();
+                            }
+                            end_col += 1;
+
+                            repetition = Some(total_value as u16);
+
+                            char_stream.next();
+                        }
+                    }
+
+                    lexeme_bounds.push(LexemeSpan { start_col, end_col });
                     map.push((line_no, lexeme_bounds.len() - 1));
-
-                    internal.push(MultiInstr {
-                        instr,
-                        repetition: None
-                    });
+                    internal.push(MultiInstr { instr, repetition });
                 }
             }
 
@@ -453,11 +490,11 @@ impl Thread {
 
         match instr {
             Instr::MoveForward => {
-                mmod_map(&mut self.memory_ptr.0, 0, self.direction, |c| c + 1);
+                mmod_map(&mut self.memory_ptr.0, 0, true, self.direction, |c| c + 1);
                 self.incr_instr();
             },
             Instr::MoveBackward => {
-                mmod_map(&mut self.memory_ptr.0, 0, self.direction, |c| c - 1);
+                mmod_map(&mut self.memory_ptr.0, 0, true, self.direction, |c| c - 1);
                 self.incr_instr();
             },
             Instr::StartLoop => {
@@ -545,9 +582,9 @@ impl MemoryEdit {
     fn edit(self, memory: &mut Memory) -> () {
         match self {
             MemoryEdit::Delta(addr, x) =>
-                mmod_map(memory, 0, addr, |y| y + x),
+                mmod_map(memory, 0, false, addr, |y| y + x),
             MemoryEdit::Absolute(addr, x) =>
-                mmod_map(memory, 0, addr, |_| x),
+                mmod_map(memory, 0, false, addr, |_| x),
             MemoryEdit::NoEdit =>
                 {}
         };
@@ -563,25 +600,25 @@ fn mget_def<K, V> (m: &BTreeMap<K, V>, def: V, key: K) -> V
     *m.get(&key).unwrap_or(&def)
 }
 
-fn mset_def<K, V> (m: &mut BTreeMap<K, V>, def: V, key: K, new_val: V) -> ()
+fn mset_def<K, V> (m: &mut BTreeMap<K, V>, def: V, remove_default: bool, key: K, new_val: V) -> ()
     where
         K: Ord,
         V: Copy + Eq
 {
-    if new_val == def {
+    if new_val == def && remove_default {
         m.remove(&key);
     } else {
         m.insert(key, new_val);
     }
 }
 
-fn mmod_map<K, V, F> (m: &mut BTreeMap<K, V>, def: V, key: K, f: F)
+fn mmod_map<K, V, F> (m: &mut BTreeMap<K, V>, def: V, remove_default: bool, key: K, f: F)
     where
         K: Ord + Clone,
         V: Copy + Eq,
         F: FnOnce(V) -> V
 {
-    mset_def(m, def, key.clone(), f(mget_def(m, def, key)));
+    mset_def(m, def, remove_default, key.clone(), f(mget_def(m, def, key)));
 }
 
 // cursive utils
