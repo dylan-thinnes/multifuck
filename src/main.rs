@@ -3,83 +3,184 @@ use std::io;
 use std::io::{BufReader, BufRead};
 use std::fs::File;
 use std::hash::{Hash};
-use std::collections::HashSet;
 use std::thread;
-use std::time::Duration;
 use std::fmt;
+use std::cell::RefCell;
+use crossbeam_requests::{RequestSender};
 
 use std::path::PathBuf;
 use structopt::StructOpt;
 
-use std::sync::mpsc;
+use std::sync::{mpsc, Mutex, Arc};
+
+use std::io::{Error, ErrorKind};
+
+use cursive_aligned_view::Alignable;
+
+use serde;
+use serde::{Serialize, Deserialize};
+use serdebug::SerDebug;
 
 use cursive::{
     Cursive,
     XY,
-    align::HAlign,
-    event::{EventResult, Key},
-    traits::With,
     theme::{
         Style,
         ColorStyle,
         ColorType,
         Color,
         BaseColor,
-        PaletteColor::{Primary, Secondary}
+        PaletteColor::{Primary, HighlightInactive}
     },
     utils::span::SpannedString,
-    view::{View, ViewWrapper, scroll::{Scroller, ScrollStrategy}, Scrollable, Resizable},
-    views::{ScrollView, ResizedView, LinearLayout, Dialog, OnEventView, Panel, TextView, TextContent},
+    view::{View, ViewWrapper, Resizable, scroll::{ScrollStrategy}, Scrollable},
+    views::{ResizedView, ScrollView, LinearLayout, Panel, TextView, TextContent, EditView, Button},
 };
-
-mod logs;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "multifuck", version = "0.0.1")]
 struct Opt {
     /// Brainfuck source to run, stdin if not present
     #[structopt(parse(from_os_str))]
-    input: PathBuf,
+    source_path: PathBuf,
 
     /// Run program with debugging window
     #[structopt(long, short)]
-    debug: bool
+    debug: bool,
+
+    /// Preemptive inputs to supply to `,`
+    inputs: Vec<String>,
+
+    /// Use ascii-input mode
+    #[structopt(long, short)]
+    ascii: bool,
+}
+
+#[derive(Serialize, Debug, Clone, Copy)]
+enum InputMode { Ascii, Integral }
+
+#[derive(Serialize, SerDebug)]
+struct Inputter {
+    input_mode: InputMode,
+    queue: Vec<String>,
+    idx: usize,
+    thread_positions: Vec<usize>,
+    closed: bool,
+    #[serde(skip_serializing)]
+    requester: RequestSender<(), String>
+}
+
+impl Inputter {
+    fn new (input_mode: InputMode, presubmitted: Vec<String>, requester: RequestSender<(), String>) -> Self {
+        Inputter {
+            input_mode, requester,
+            queue: presubmitted,
+            idx: 0,
+            thread_positions: vec![],
+            closed: false
+        }
+    }
+
+    fn next (&mut self) -> Option<i32> {
+        while self.idx >= self.queue.len() {
+            let new_inp = self.requester.request(()).unwrap().collect().unwrap();
+            self.queue.push(new_inp);
+        }
+
+        let raw_inp: String = self.queue[self.idx].clone();
+
+        self.idx += 1;
+        raw_inp.trim().parse().ok()
+    }
 }
 
 fn main () -> io::Result<()> {
     let opt = Opt::from_args();
+    let mode = if opt.ascii { InputMode::Ascii } else { InputMode::Integral };
 
-    let f = File::open(opt.input)?;
+    let f = File::open(opt.source_path)?;
     let input_program = Box::new(BufReader::new(f));
 
     let (tape, source_map) = Tape::parse(input_program)?;
+
+    let (input_requester, input_responder) = crossbeam_requests::channel::<(), String>();
+
     let mut state = State {
         tape, source_map,
         memory: BTreeMap::new(),
         threads: vec![
             Thread::new()
         ],
-        outputs: vec![]
+        outputs: vec![],
+        inputter: Inputter::new(mode, opt.inputs, input_requester)
     };
 
     if !opt.debug {
         let mut output_idx = 0;
-        while state.step() {
+
+        thread::spawn(move || {
+            input_responder.poll_loop(|req, res_sender| {
+                let mut raw_inp = String::new();
+                io::stdin().read_line(&mut raw_inp);
+                res_sender.respond(raw_inp);
+            });
+        });
+
+        while state.step().unwrap_or(false) {
             for (thread_id, line) in state.outputs[output_idx..].iter() {
                 println!("<{}>: {}", thread_id, line);
             }
             output_idx = state.outputs.len();
         }
     } else {
+        let (tx, rx) = mpsc::channel::<UICommand>();
+
+        let exit_sender = tx.clone();
+        let step_btn_sender = tx.clone();
+        let incr_step_btn_sender = tx.clone();
+        let decr_step_btn_sender = tx.clone();
+
         let source_content = TextContent::new("");
         let output_stream_content = TextContent::new("");
+        let input_stream_content = TextContent::new("");
         let memory_content = TextContent::new("");
+        let step_size_view = TextContent::new("");
+
+        let (input_queue_send, input_queue_recv) = mpsc::channel::<String>();
+        thread::spawn(move || {
+            input_responder.poll_loop(|req, res_sender| {
+                match input_queue_recv.recv() {
+                    Ok(raw_inp) => { res_sender.respond(raw_inp); }
+                    Err(_) => { return; }
+                }
+            });
+        });
 
         let mut siv = cursive::default();
         siv.add_fullscreen_layer(
             LinearLayout::horizontal()
             .child(
-                Panel::new(TextView::new_with_content(source_content.clone()))
+                Panel::new(
+                    LinearLayout::vertical()
+                    .child(
+                        ResizedView::with_full_height(
+                            TextView::new_with_content(source_content.clone())
+                        )
+                        .scrollable()
+                    )
+                    .child(
+                        LinearLayout::horizontal()
+                        .child(Button::new("Next Step", move |_| { step_btn_sender.send(UICommand::Step); }))
+                        .child(TextView::new(" | Step Size: "))
+                        .child(Button::new("-", move |_| { decr_step_btn_sender.send(UICommand::DecrStep); }))
+                        .child(TextView::new(" "))
+                        .child(TextView::new_with_content(step_size_view.clone()))
+                        .child(TextView::new(" "))
+                        .child(Button::new("+", move |_| { incr_step_btn_sender.send(UICommand::IncrStep); }))
+                        .align_bottom_center()
+                        .fixed_height(1)
+                    )
+                )
                 .title("Source")
                 .percent_width((0.0, 0.5))
             )
@@ -98,9 +199,16 @@ fn main () -> io::Result<()> {
                     )
                     .child(
                         Panel::new(
-                            TextView::new_with_content(output_stream_content.clone())
-                            .scrollable()
-                            .scroll_strategy(ScrollStrategy::StickToBottom)
+                            LinearLayout::vertical()
+                            .child(
+                                TextView::new_with_content(input_stream_content.clone())
+                                .scrollable()
+                                .scroll_strategy(ScrollStrategy::StickToBottom)
+                            )
+                            .child(
+                                EditView::new()
+                                .on_submit(move |_, s| { input_queue_send.send(String::from(s)); })
+                            )
                         )
                         .title("Input")
                         .percent_width((0.5, 1.0))
@@ -117,10 +225,6 @@ fn main () -> io::Result<()> {
         );
 
         let cb_sink = siv.cb_sink().clone();
-        let (tx, rx) = mpsc::channel::<UICommand>();
-
-        let exit_sender = tx.clone();
-        let step_sender = tx.clone();
 
         siv.add_global_callback('q', move |s| {
             s.quit();
@@ -129,46 +233,68 @@ fn main () -> io::Result<()> {
             }
         });
 
+        let step_sender = tx.clone();
+        let incr_step_sender = tx.clone();
+        let decr_step_sender = tx.clone();
+
         siv.add_global_callback(' ', move |_| {
             if step_sender.send(UICommand::Step).is_err() {
                 return;
             }
-            if step_sender.send(UICommand::Repaint).is_err() {
+        });
+
+        siv.add_global_callback('+', move |_| {
+            if incr_step_sender.send(UICommand::IncrStep).is_err() {
+                return;
+            }
+        });
+
+        siv.add_global_callback('-', move |_| {
+            if decr_step_sender.send(UICommand::DecrStep).is_err() {
                 return;
             }
         });
 
         let handle = thread::spawn(move || {
-            'outer: loop {
-                while let Ok(ui_command) = rx.recv() {
-                    match ui_command {
-                        UICommand::Repaint => {
-                            source_content.set_content(state.spanned_tape());
-                            output_stream_content.set_content(state.output_log());
-                            memory_content.set_content(format!["{:?}", state.memory]);
-                            cb_sink.send(Box::new(Cursive::noop)).unwrap();
-                        },
-                        UICommand::Step => {
-                            if !state.step() {
-                                break 'outer;
-                            }
-                        },
-                        UICommand::Exit => {
-                            break 'outer;
-                        },
-                    }
+            let mut step_size = 1;
+
+            while let Ok(ui_command) = rx.recv() {
+                match ui_command {
+                    UICommand::Repaint => {
+                    },
+                    UICommand::Step => {
+                        for _ in 0..step_size {
+                            state.step()?;
+                        }
+                    },
+                    UICommand::Exit => {
+                        break;
+                    },
+                    UICommand::IncrStep => {
+                        step_size *= 2;
+                    },
+                    UICommand::DecrStep => {
+                        step_size /= 2;
+                        step_size = step_size.max(1);
+                    },
                 }
+
+                source_content.set_content(state.spanned_tape());
+                output_stream_content.set_content(state.output_log());
+                memory_content.set_content(format!("{:?}", state.memory));
+                step_size_view.set_content(format!("{:#5}", step_size));
+
+                cb_sink.send(Box::new(Cursive::noop)).unwrap();
             }
+
+            Some(())
         });
 
-        tx.send(UICommand::Repaint);
+        tx.send(UICommand::Repaint).map_err(|_| Error::new(ErrorKind::Other, "Couldn't repaint"))?;
         siv.run();
 
-        handle.join();
+        handle.join().map_err(|_| Error::new(ErrorKind::Other, "Couldn't join runner thread."))?;
     }
-
-    //while state.step() {}
-    //println!("{:?}", state);
 
     Ok(())
 }
@@ -176,7 +302,9 @@ fn main () -> io::Result<()> {
 enum UICommand {
     Exit,
     Repaint,
-    Step
+    Step,
+    IncrStep,
+    DecrStep
 }
 
 #[derive(Debug)]
@@ -185,18 +313,19 @@ struct State {
     memory: Memory,
     threads: Vec<Thread>,
     source_map: SourceMap,
-    outputs: Vec<(usize, String)>
+    outputs: Vec<(usize, String)>,
+    inputter: Inputter
 }
 
 impl State {
-    fn step (&mut self) -> bool {
+    fn step (&mut self) -> Option<bool> {
         let mut at_least_one_live_thread = false;
 
         let mut memory_edits = vec![];
         let mut forks = vec![];
 
         for (idx, thread) in &mut self.threads.iter_mut().enumerate() {
-            match thread.step(&mut self.tape, &mut self.memory) {
+            match thread.step(&mut self.tape, &mut self.memory, &mut self.inputter) {
                 None => {},
                 Some((maybe_output, memory_edit, fork)) => {
                     at_least_one_live_thread = true;
@@ -219,10 +348,10 @@ impl State {
         }
 
         for memory_edit in memory_edits {
-            memory_edit.edit(&mut self.memory);
+            memory_edit.edit(&mut self.memory, &mut self.inputter)?;
         }
 
-        at_least_one_live_thread
+        Some(at_least_one_live_thread)
     }
 
     fn output_log (&self) -> SpannedString<Style> {
@@ -230,8 +359,9 @@ impl State {
 
         for (thread_id, line) in &self.outputs {
             span.append_styled(
-                format!["<{}>", thread_id],
-                ColorStyle::secondary());
+                format!("<{}>", thread_id),
+                ColorStyle::secondary()
+            );
             span.append_plain(": ");
             span.append_plain(line);
             span.append_plain("\n");
@@ -479,7 +609,7 @@ impl Thread {
         self.sleeping = true;
     }
 
-    fn step (&mut self, tape: &Tape, curr_memory: &Memory) -> Option<(Option<String>, MemoryEdit, bool)> {
+    fn step (&mut self, tape: &Tape, curr_memory: &Memory, inputter: &mut Inputter) -> Option<(Option<String>, MemoryEdit, bool)> {
         if self.sleeping {
             self.sleeping = false;
             return Some((None, MemoryEdit::NoEdit, false));
@@ -545,16 +675,14 @@ impl Thread {
 
         // Save any output
         let output = match instr {
-            Instr::Output => Some(format!["{}", mget_def(curr_memory, 0, self.memory_ptr.clone())]),
+            Instr::Output => Some(format!("{}", mget_def(curr_memory, 0, self.memory_ptr.clone()))),
             _ => None
         };
 
         // Calculate the memory modifying function
         let memory_edit = match instr {
             Instr::Input => {
-                let mut raw_inp: String = String::new();
-                io::stdin().read_line(&mut raw_inp).expect("Failed to a line from stdin!");
-                let inp: i32 = raw_inp.trim().parse().expect("Non-number input from stdin!");
+                let inp = inputter.next()?;
                 MemoryEdit::Absolute(self.memory_ptr.clone(), inp)
             },
             Instr::Increment =>
@@ -575,11 +703,12 @@ impl Thread {
 enum MemoryEdit {
     Delta(Address, i32),
     Absolute(Address, i32),
+    //Input(Address),
     NoEdit
 }
 
 impl MemoryEdit {
-    fn edit(self, memory: &mut Memory) -> () {
+    fn edit(self, memory: &mut Memory, inputter: &mut Inputter) -> Option<()> {
         match self {
             MemoryEdit::Delta(addr, x) =>
                 mmod_map(memory, 0, false, addr, |y| y + x),
@@ -588,6 +717,8 @@ impl MemoryEdit {
             MemoryEdit::NoEdit =>
                 {}
         };
+
+        Some(())
     }
 }
 

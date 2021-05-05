@@ -1,6 +1,17 @@
-,>,<
-[->
+,>,<             # Take two items, <n> into (0) and <m> into (1)
+[->              # For each <n>...
+    [->+>+<<]    # Simulmove <m> to (1) and (2)
+    >[-<+>]<     # Move <m> from (2) back to (0)
+<]               # End result: <m> gets accumulated <n> times into (2)
+>>>[<<<+>>>-]<<< # Move <n * m> from (2) into (0)
+>[-]<            # Clear <m> from (1)
+.                # Print <n * m> from (0)
+
+>,<              # Take new item <k> into (0)
+[->              # Do the same with <n * m> and <k> to produce <n * m * k> into (2)
     [->+>+<<]
     >[-<+>]<
 <]
->>>.
+>>>[<<<+>>>-]<<< # Move <n * m * k> into (0)
+>[-]<            # Clear <k> from (1)
+.                # Print <n * m * k>
