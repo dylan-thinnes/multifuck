@@ -32,8 +32,6 @@ use cursive::{
     views::{ScrollView, ResizedView, LinearLayout, Dialog, OnEventView, Panel, TextView, TextContent},
 };
 
-mod logs;
-
 #[derive(Debug, StructOpt)]
 #[structopt(name = "multifuck", version = "0.0.1")]
 struct Opt {
