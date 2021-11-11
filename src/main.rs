@@ -41,7 +41,11 @@ struct Opt {
 
     /// Run program with debugging window
     #[structopt(long, short)]
-    debug: bool
+    debug: bool,
+
+    /// Output printed numbers in ASCII mode
+    #[structopt(long, short)]
+    ascii: bool
 }
 
 fn main () -> io::Result<()> {
@@ -62,9 +66,13 @@ fn main () -> io::Result<()> {
 
     if !opt.debug {
         let mut output_idx = 0;
-        while state.step() {
+        while state.step(opt.ascii) {
             for (thread_id, line) in state.outputs[output_idx..].iter() {
-                println!("<{}>: {}", thread_id, line);
+                if opt.ascii {
+                    print!("{}", line);
+                } else {
+                    println!("<{}>: {}", thread_id, line);
+                }
             }
             output_idx = state.outputs.len();
         }
@@ -136,6 +144,7 @@ fn main () -> io::Result<()> {
             }
         });
 
+        let copied_ascii_mode: bool = opt.ascii;
         let handle = thread::spawn(move || {
             'outer: loop {
                 while let Ok(ui_command) = rx.recv() {
@@ -147,7 +156,7 @@ fn main () -> io::Result<()> {
                             cb_sink.send(Box::new(Cursive::noop)).unwrap();
                         },
                         UICommand::Step => {
-                            if !state.step() {
+                            if !state.step(copied_ascii_mode) {
                                 break 'outer;
                             }
                         },
@@ -187,14 +196,14 @@ struct State {
 }
 
 impl State {
-    fn step (&mut self) -> bool {
+    fn step (&mut self, ascii_mode: bool) -> bool {
         let mut at_least_one_live_thread = false;
 
         let mut memory_edits = vec![];
         let mut forks = vec![];
 
         for (idx, thread) in &mut self.threads.iter_mut().enumerate() {
-            match thread.step(&mut self.tape, &mut self.memory) {
+            match thread.step(&mut self.tape, &mut self.memory, ascii_mode) {
                 None => {},
                 Some((maybe_output, memory_edit, fork)) => {
                     at_least_one_live_thread = true;
@@ -477,7 +486,7 @@ impl Thread {
         self.sleeping = true;
     }
 
-    fn step (&mut self, tape: &Tape, curr_memory: &Memory) -> Option<(Option<String>, MemoryEdit, bool)> {
+    fn step (&mut self, tape: &Tape, curr_memory: &Memory, ascii_mode: bool) -> Option<(Option<String>, MemoryEdit, bool)> {
         if self.sleeping {
             self.sleeping = false;
             return Some((None, MemoryEdit::NoEdit, false));
@@ -543,7 +552,19 @@ impl Thread {
 
         // Save any output
         let output = match instr {
-            Instr::Output => Some(format!["{}", mget_def(curr_memory, 0, self.memory_ptr.clone())]),
+            Instr::Output => {
+                let val = mget_def(curr_memory, 0, self.memory_ptr.clone());
+                let text = if ascii_mode {
+                    // TODO: Handle chars in range > 2^31 expressible by i32
+                    match std::char::from_u32(val as u32) {
+                        None => format!("{}", val),
+                        Some(c) => format!("{}", c)
+                    }
+                } else {
+                    format!("{}", val)
+                };
+                Some(text)
+            },
             _ => None
         };
 
