@@ -1,0 +1,17 @@
+initialize 80 to move
+>,<
+
+spawn 3 threads to move value thrice as fast
+&+-
+[+-
+  >[->+<]
+]
+[
+  &+-
+  [+-
+    [][]>[->+<]
+  ]
+  [
+    [][][][]>[->+<]
+  ]
+]

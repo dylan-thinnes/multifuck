@@ -1,0 +1,37 @@
+initialize 80 to move
+>>>,<<<
+
+&+-[+-
+  Watch for zero on every cycle and counter the decrement
+  Then decrement by three to handle pipelined increment instructions
+  &+-[+-
+    &>>>[][++>>---.<<]<<<
+  ]
+  [
+    &>>>[][+]<<<
+  ]
+]
+[
+  Spawn eight threads
+  &+-[+-
+    >&+-[+-
+      >&+-[+- [][][] ] [ ]
+      []
+    ]
+    [
+      >&+-[+- [][][] ] [ ]
+    ]
+  ]
+  [
+    >&+-[+-
+      >&+-[+- [][][] ] [ ]
+      []
+    ]
+    [
+      >&+-[+- [][][] ] [ ]
+    ]
+  ]
+
+  Keep moving one value at a time
+  >[->>+<<]<
+]

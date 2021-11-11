@@ -1,0 +1,140 @@
+eight threads
+&+-[+-
+  program 0
+  &+-[+-
+    program 00
+    &
+    []
+  ][
+    program 01
+    &
+  ]
+  [][][]
+][
+  program 1
+  &+-[+-
+    program 10
+    &
+    []
+  ][
+    program 11
+    &
+  ]
+]
+
+>>>>>>>>>>>>>>>>>>>>>>
+
+six threads
+#&+-[+-
+#  program 0
+#  >&[][][][][]
+#][
+#  program 1
+#  &+-[+-
+#    program 01
+#    &
+#    []
+#  ][
+#    program 11
+#    &
+#  ]>
+#]
+#
+#>>>>>>>>>>>>>>>>>>>>>>
+
+six threads (inefficient use of inner loops)
+#&+-[+-
+#  program 0
+#  >
+#  &+-[+-
+#    program 00
+#  ][
+#    program 10
+#  ]
+#  [][][]<
+#][
+#  program 1
+#  &+-[+-
+#    program 01
+#    &+-[+-
+#      program 001
+#    ][
+#      program 101
+#    ]
+#    []
+#  ][
+#    program 11
+#    &+-[+-
+#      program 011
+#    ][
+#      program 111
+#    ]
+#  ]
+#]
+#
+#>>>>>>>>>>>>>>>>>>>>>>
+
+eight threads (inefficient use of inner loops)
+# &+-[+-
+#   program 0
+#   &+-[+-
+#     program 00
+#     &+-[+-
+#       program 000
+#     ][
+#       program 001
+#     ]
+#     []
+#   ][
+#     program 01
+#     &+-[+-
+#       program 010
+#     ][
+#       program 011
+#     ]
+#   ]
+#   [][][]
+# ][
+#   program 1
+#   &+-[+-
+#     program 10
+#     &+-[+-
+#       program 100
+#     ][
+#       program 101
+#     ]
+#     []
+#   ][
+#     program 11
+#     &+-[+-
+#       program 110
+#     ][
+#       program 111
+#     ]
+#   ]
+# ]
+# 
+# >>>>>>>>>>>>>>>>>>>>>>
+
+four threads
+# &+-[+-
+#   program 0
+#   &+-[+-
+#     program 00
+#     >
+#   ][
+#     program 01
+#     >
+#   ]
+# ][
+#   program 1
+#   &+-[+-
+#     program 10
+#     >
+#   ][
+#     program 11
+#     >
+#   ]
+# ]
+# 
+# >>>>>>>>>>>>>>>>>>>>>>
