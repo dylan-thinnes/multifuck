@@ -76,6 +76,10 @@ fn main () -> io::Result<()> {
             }
             output_idx = state.outputs.len();
         }
+
+        for (thread_id, thread) in state.threads.iter().enumerate() {
+            eprintln!("Thread {}: steps taken {}", thread_id, thread.steps_taken);
+        }
     } else {
         let source_content = TextContent::new("");
         let output_stream_content = TextContent::new("");
@@ -463,7 +467,8 @@ struct Thread {
     instr_ptr: usize,
     memory_ptr: Address,
     direction: Direction,
-    sleeping: bool
+    sleeping: bool,
+    steps_taken: usize
 }
 
 impl Thread {
@@ -473,6 +478,7 @@ impl Thread {
             memory_ptr: Address::new(),
             direction: 0,
             sleeping: false,
+            steps_taken: 0
         }
     }
 
@@ -586,6 +592,7 @@ impl Thread {
 
         let will_fork = instr == Instr::Fork;
 
+        self.steps_taken += 1;
         Some((output, memory_edit, will_fork))
     }
 }
