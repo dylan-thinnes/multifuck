@@ -1,0 +1,17 @@
+<++++++++++>
+
+CHOOSE PROG: ,
+
+>+<         Initialize zero flag
+
+[->[-]<     If gt 0: decrement and clear zero flag
+  >+++.[-]< PROG1
+[-]]        Clear remaining values in case gt 1
+
+>[[-]<      If zero flag is set (ie input is zero): clear zero flag
+  >+.[-]<   PROG0
+>]          Adjust position for teardown
+
+<           Teardown: return to original position
+
+<.>         Sanity check: should print 3
