@@ -16,6 +16,26 @@ This interpreter is slightly different from the original brainfuck spec:
   bracket `]` always makes an unconditional jump back to its matching `[`. The
   original spec did the check on both brackets.
 
+## Debug Mode
+
+This interpreter also has a visual "debug mode" for stepping through your
+brainfuck program - turn it on with `--debug`.
+
+It is incomplete and a bit buggy, so use with caution - esp. for getting input,
+the debugger only reads input on stdin, which means inputs must be piped in
+beforehand, like so:
+
+```
+echo <my_integer_input> | rs-multifuck --debug <my_program_that_reads_an_integer_input>
+```
+
+## ASCII Mode
+
+The interpreter can run in "ASCII mode" using `--ascii`, where it
+(counterintuitively) prints the Unicode character corresponding to the number
+under the tape, rather than the number itself. Input is still in the form of
+integers, however.
+
 # Multidimensional memory
 
 Multidimensional memory adds two instructions, `*` and `/`, which allows the
