@@ -2,10 +2,7 @@
 
 Brainfuck, with extensions as I think of them.
 
-So far:
-
-- Multithreading
-- Multidimensional memory
+## Differences from original
 
 This interpreter is slightly different from the original brainfuck spec:
 
@@ -36,7 +33,14 @@ The interpreter can run in "ASCII mode" using `--ascii`, where it
 under the tape, rather than the number itself. Input is still in the form of
 integers, however.
 
-# Multidimensional memory
+## Extensions
+
+So far, there are two extensions:
+
+- Multithreading
+- Multidimensional memory
+
+### Multidimensional memory
 
 Multidimensional memory adds two instructions, `*` and `/`, which allows the
 memory pointer to access new "dimensions" on the tape.
@@ -51,7 +55,7 @@ While the `*` instruction can be said to reorient from dim n to dim n+1, the
 dimensions exist in our memory, and are just as orthogonal as all the positive
 dimensions are.
 
-# Multithreading
+### Multithreading
 
 Multithreading adds one instruction, `&`, which spawns a thread which waits one
 cycle before continuing in the same manner on the program tape.
