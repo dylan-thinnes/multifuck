@@ -34,7 +34,7 @@ use cursive::{
     },
     utils::span::SpannedString,
     view::{View, ViewWrapper, Resizable, scroll::{ScrollStrategy}, Scrollable},
-    views::{ResizedView, ScrollView, LinearLayout, Panel, TextView, TextContent, EditView, Button},
+    views::{ResizedView, ScrollView, LinearLayout, Panel, TextView, TextContent, EditView, Button, NamedView},
 };
 
 #[derive(Debug, StructOpt)]
@@ -201,13 +201,24 @@ fn main () -> io::Result<()> {
                         Panel::new(
                             LinearLayout::vertical()
                             .child(
-                                TextView::new_with_content(input_stream_content.clone())
+                                ResizedView::with_full_height(
+                                    TextView::new_with_content(input_stream_content.clone())
+                                )
                                 .scrollable()
                                 .scroll_strategy(ScrollStrategy::StickToBottom)
                             )
                             .child(
-                                EditView::new()
-                                .on_submit(move |_, s| { input_queue_send.send(String::from(s)); })
+                                NamedView::new("user_input_editor",
+                                    EditView::new()
+                                    .on_submit(move |cursive, s| {
+                                        let editor = cursive.find_name::<EditView>("user_input_editor");
+                                        if let Some(mut editor) = editor {
+                                            editor.set_content("");
+                                        }
+                                        input_queue_send.send(String::from(s));
+                                    })
+                                )
+                                .full_width()
                             )
                         )
                         .title("Input")
@@ -281,6 +292,7 @@ fn main () -> io::Result<()> {
 
                 source_content.set_content(state.spanned_tape());
                 output_stream_content.set_content(state.output_log());
+                input_stream_content.set_content(state.input_log());
                 memory_content.set_content(format!("{:?}", state.memory));
                 step_size_view.set_content(format!("{:#5}", step_size));
 
@@ -363,6 +375,17 @@ impl State {
                 ColorStyle::secondary()
             );
             span.append_plain(": ");
+            span.append_plain(line);
+            span.append_plain("\n");
+        }
+
+        span
+    }
+
+    fn input_log (&self) -> SpannedString<Style> {
+        let mut span = SpannedString::<Style>::plain("");
+
+        for line in &self.inputter.queue {
             span.append_plain(line);
             span.append_plain("\n");
         }
