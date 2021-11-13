@@ -89,7 +89,11 @@ fn main () -> io::Result<()> {
         siv.add_fullscreen_layer(
             LinearLayout::horizontal()
             .child(
-                Panel::new(TextView::new_with_content(source_content.clone()))
+                Panel::new(
+                    TextView::new_with_content(source_content.clone())
+                    .scrollable()
+                    .scroll_strategy(ScrollStrategy::KeepRow)
+                )
                 .title("Source")
                 .percent_width((0.0, 0.5))
             )
