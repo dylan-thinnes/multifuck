@@ -497,7 +497,7 @@ impl State {
         }
 
         for memory_edit in memory_edits {
-            memory_edit.edit(&mut self.memory);
+            self.memory.edit(memory_edit);
         }
 
         if at_least_one_live_thread {
@@ -689,6 +689,21 @@ impl Memory {
     fn new () -> Self {
         Memory(BTreeMap::new())
     }
+
+    fn edit (&mut self, edit: MemoryEdit) -> () {
+        match edit {
+            MemoryEdit::Delta(addr, x) =>
+                mmod_map(&mut self.0, 0, false, addr, |y| y + x),
+            MemoryEdit::Absolute(addr, x) =>
+                mmod_map(&mut self.0, 0, false, addr, |_| x),
+            MemoryEdit::NoEdit =>
+                {}
+        };
+    }
+
+    fn get (&self, addr: &Address) -> i32 {
+        mget_def(&self.0, 0, addr.clone())
+    }
 }
 
 impl fmt::Debug for Memory {
@@ -802,7 +817,7 @@ impl Thread {
                 self.incr_instr();
             },
             Instr::StartLoop => {
-                let curr_val = mget_def(&curr_memory.0, 0, self.memory_ptr.clone());
+                let curr_val = curr_memory.get(&self.memory_ptr);
                 if curr_val == 0 {
                     let mut depth = 0;
 
@@ -896,19 +911,6 @@ enum MemoryEdit {
     Delta(Address, i32),
     Absolute(Address, i32),
     NoEdit
-}
-
-impl MemoryEdit {
-    fn edit(self, memory: &mut Memory) -> () {
-        match self {
-            MemoryEdit::Delta(addr, x) =>
-                mmod_map(&mut memory.0, 0, false, addr, |y| y + x),
-            MemoryEdit::Absolute(addr, x) =>
-                mmod_map(&mut memory.0, 0, false, addr, |_| x),
-            MemoryEdit::NoEdit =>
-                {}
-        };
-    }
 }
 
 // map utils
