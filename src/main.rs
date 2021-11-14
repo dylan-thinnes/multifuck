@@ -256,9 +256,6 @@ fn main () -> io::Result<()> {
         handle.join();
     }
 
-    //while state.step() {}
-    //println!("{:?}", state);
-
     Ok(())
 }
 
