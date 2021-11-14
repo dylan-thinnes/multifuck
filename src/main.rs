@@ -52,9 +52,13 @@ struct Opt {
     #[structopt(long, short)]
     ascii: bool,
 
-    /// Enable multidimensional memory instructions (also turns on different memory visualizer)
+    /// Enable multidimensional memory instructions `*` and `/` (also turns on different memory visualizer)
     #[structopt(long, short)]
-    multidim: bool
+    multidim: bool,
+
+    /// Enable fork instruction `&` and threads
+    #[structopt(long, short)]
+    threads: bool
 }
 
 struct InputLog {
@@ -151,7 +155,7 @@ fn main () -> io::Result<()> {
     let f = File::open(opt.source)?;
     let input_program = Box::new(BufReader::new(f));
 
-    let (tape, source_map) = Tape::parse(input_program, opt.multidim)?;
+    let (tape, source_map) = Tape::parse(input_program, &opt)?;
     let mut state = State {
         tape, source_map,
         memory: Memory::new(),
@@ -598,7 +602,7 @@ impl Tape {
         self.0.get(idx)
     }
 
-    fn parse<B: BufRead> (buff: B, multidim: bool) -> io::Result<(Self, SourceMap)> {
+    fn parse<B: BufRead> (buff: B, opt: &Opt) -> io::Result<(Self, SourceMap)> {
         let mut internal = vec![];
         let mut source = vec![];
         let mut map = vec![];
@@ -610,7 +614,7 @@ impl Tape {
 
             while let Some((col_no, c)) = char_stream.next() {
                 if c == '#' { break; }
-                if let Some(instr) = Instr::parse(c, multidim) {
+                if let Some(instr) = Instr::parse(c, opt) {
                     let start_col = col_no;
                     let mut repetition = None;
                     let mut end_col = start_col + 1;
@@ -670,19 +674,19 @@ enum Instr {
 }
 
 impl Instr {
-    fn parse (c: char, multidim: bool) -> Option<Self> {
-        match (c, multidim) {
-            ('+', _)    => Some(Instr::Increment),
-            ('-', _)    => Some(Instr::Decrement),
-            ('>', _)    => Some(Instr::MoveForward),
-            ('<', _)    => Some(Instr::MoveBackward),
-            ('[', _)    => Some(Instr::StartLoop),
-            (']', _)    => Some(Instr::EndLoop),
-            ('.', _)    => Some(Instr::Output),
-            (',', _)    => Some(Instr::Input),
-            ('&', _)    => Some(Instr::Fork),
-            ('*', true) => Some(Instr::RotateUp),
-            ('/', true) => Some(Instr::RotateDown),
+    fn parse (c: char, opt: Opt) -> Option<Self> {
+        match (c, opt.multidim, opt.threads) {
+            ('+', _,    _)    => Some(Instr::Increment),
+            ('-', _,    _)    => Some(Instr::Decrement),
+            ('>', _,    _)    => Some(Instr::MoveForward),
+            ('<', _,    _)    => Some(Instr::MoveBackward),
+            ('[', _,    _)    => Some(Instr::StartLoop),
+            (']', _,    _)    => Some(Instr::EndLoop),
+            ('.', _,    _)    => Some(Instr::Output),
+            (',', _,    _)    => Some(Instr::Input),
+            ('&', _,    true) => Some(Instr::Fork),
+            ('*', true, _)    => Some(Instr::RotateUp),
+            ('/', true, _)    => Some(Instr::RotateDown),
             _   => None
         }
     }
