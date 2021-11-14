@@ -212,37 +212,35 @@ fn main () -> io::Result<()> {
         let handle = thread::spawn(move || {
             let mut step_size = 1;
 
-            'outer: loop {
-                while let Ok(ui_command) = rx.recv() {
-                    match ui_command {
-                        UICommand::Repaint => {
-                        },
-                        UICommand::Step => {
-                            for _ in 0..step_size {
-                                if !state.step(copied_ascii_mode) {
-                                    break 'outer;
-                                }
+            while let Ok(ui_command) = rx.recv() {
+                match ui_command {
+                    UICommand::Repaint => {
+                    },
+                    UICommand::Step => {
+                        for _ in 0..step_size {
+                            if !state.step(copied_ascii_mode) {
+                                break;
                             }
-                        },
-                        UICommand::IncrStepSize => {
-                            step_size *= 2;
-                        },
-                        UICommand::DecrStepSize => {
-                            if step_size > 1 {
-                                step_size /= 2;
-                            }
-                        },
-                        UICommand::Exit => {
-                            break 'outer;
-                        },
-                    }
-
-                    source_content.set_content(state.spanned_tape());
-                    output_stream_content.set_content(state.output_log());
-                    memory_content.set_content(format!["{:?}", state.memory]);
-                    step_size_view.set_content(format!("{:#5}", step_size));
-                    cb_sink.send(Box::new(Cursive::noop)).unwrap();
+                        }
+                    },
+                    UICommand::IncrStepSize => {
+                        step_size *= 2;
+                    },
+                    UICommand::DecrStepSize => {
+                        if step_size > 1 {
+                            step_size /= 2;
+                        }
+                    },
+                    UICommand::Exit => {
+                        break;
+                    },
                 }
+
+                source_content.set_content(state.spanned_tape());
+                output_stream_content.set_content(state.output_log());
+                memory_content.set_content(format!["{:?}", state.memory]);
+                step_size_view.set_content(format!("{:#5}", step_size));
+                cb_sink.send(Box::new(Cursive::noop)).unwrap();
             }
 
             source_content.set_content(state.spanned_tape());
