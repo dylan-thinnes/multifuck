@@ -95,14 +95,6 @@ fn main () -> io::Result<()> {
             eprintln!("Thread {}: steps taken {}", thread_id, thread.steps_taken);
         }
     } else {
-        thread::spawn(move || {
-            loop {
-                let mut raw_inp = String::new();
-                io::stdin().read_line(&mut raw_inp);
-                give_input_tx.send(raw_inp);
-            }
-        });
-
         let (tx, rx) = mpsc::channel::<UICommand>();
 
         let source_content = TextContent::new("");
@@ -169,11 +161,12 @@ fn main () -> io::Result<()> {
                             .child(
                                 NamedView::new("user_input_editor",
                                     EditView::new()
-                                    .on_submit(move |cursive, s| {
+                                    .on_submit(move |cursive, raw_inp| {
                                         let editor = cursive.find_name::<EditView>("user_input_editor");
                                         if let Some(mut editor) = editor {
                                             editor.set_content("");
                                         }
+                                        give_input_tx.send(raw_inp.to_string());
                                     })
                                 )
                                 .full_width()
