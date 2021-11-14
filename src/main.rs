@@ -110,6 +110,7 @@ fn main () -> io::Result<()> {
         let step_size_view = TextContent::new("");
         let output_stream_content = TextContent::new("");
         let input_stream_content = TextContent::new("");
+        let input_needed_content = TextContent::new("");
         let memory_content = TextContent::new("");
 
         let step_btn_sender = tx.clone();
@@ -166,6 +167,9 @@ fn main () -> io::Result<()> {
                                 )
                                 .scrollable()
                                 .scroll_strategy(ScrollStrategy::StickToBottom)
+                            )
+                            .child(
+                                TextView::new_with_content(input_needed_content.clone())
                             )
                             .child(
                                 NamedView::new("user_input_editor",
@@ -283,9 +287,9 @@ fn main () -> io::Result<()> {
             loop {
                 let is_needed: bool = need_input_rx.recv().unwrap();
                 if is_needed {
-                    input_stream_content.set_content("Need input!")
+                    input_needed_content.set_content("Need input!")
                 } else {
-                    input_stream_content.set_content("")
+                    input_needed_content.set_content("")
                 }
 
                 cb_sink_need_input.send(Box::new(Cursive::noop)).unwrap();
