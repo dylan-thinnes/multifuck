@@ -374,7 +374,7 @@ fn main () -> io::Result<()> {
                 source_content.set_content(state.spanned_tape());
                 output_stream_content.set_content(state.output_log());
                 input_stream_content.set_content(inputter.to_input_log());
-                memory_content.set_content(format!["{:?}", state.memory]);
+                memory_content.set_content(state.memory.show_1d());
                 step_size_view.set_content(format!("{:#5}", step_size));
                 cb_sink.send(Box::new(Cursive::noop)).unwrap();
 
@@ -387,7 +387,7 @@ fn main () -> io::Result<()> {
             source_content.set_content(state.spanned_tape());
             output_stream_content.set_content(state.output_log());
             input_stream_content.set_content(inputter.to_input_log());
-            memory_content.set_content(format!["{:?}", state.memory]);
+            memory_content.set_content(state.memory.show_1d());
             step_size_view.set_content(format!("{:#5}", step_size));
             cb_sink.send(Box::new(Cursive::noop)).unwrap();
         });
@@ -703,6 +703,15 @@ impl Memory {
 
     fn get (&self, addr: &Address) -> i32 {
         mget_def(&self.0, 0, addr.clone())
+    }
+
+    fn show_1d (&self) -> String {
+        let mut ordered: BTreeMap<i32, i32> = BTreeMap::new();
+        for (addr, value) in &self.0 {
+            ordered.insert(*addr.0.get(&0).unwrap_or(&0), *value);
+        }
+
+        ordered.iter().map(|(idx, val)| format!("{:#3}: {}\n", idx, val)).collect()
     }
 }
 
