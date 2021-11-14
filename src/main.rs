@@ -50,7 +50,11 @@ struct Opt {
 
     /// Output printed numbers in ASCII mode
     #[structopt(long, short)]
-    ascii: bool
+    ascii: bool,
+
+    /// Enable multidimensional memory instructions (also turns on different memory visualizer)
+    #[structopt(long, short)]
+    multidim: bool
 }
 
 struct InputLog {
@@ -147,7 +151,7 @@ fn main () -> io::Result<()> {
     let f = File::open(opt.source)?;
     let input_program = Box::new(BufReader::new(f));
 
-    let (tape, source_map) = Tape::parse(input_program)?;
+    let (tape, source_map) = Tape::parse(input_program, opt.multidim)?;
     let mut state = State {
         tape, source_map,
         memory: Memory::new(),
@@ -343,6 +347,7 @@ fn main () -> io::Result<()> {
 
 
         let copied_ascii_mode: bool = opt.ascii;
+        let copied_multidim: bool = opt.multidim;
         let handle = thread::spawn(move || {
             let mut step_size = 1;
 
@@ -374,7 +379,7 @@ fn main () -> io::Result<()> {
                 source_content.set_content(state.spanned_tape());
                 output_stream_content.set_content(state.output_log());
                 input_stream_content.set_content(inputter.to_input_log());
-                memory_content.set_content(state.memory.show_1d());
+                memory_content.set_content(state.memory.show(copied_multidim));
                 step_size_view.set_content(format!("{:#5}", step_size));
                 cb_sink.send(Box::new(Cursive::noop)).unwrap();
 
@@ -387,7 +392,7 @@ fn main () -> io::Result<()> {
             source_content.set_content(state.spanned_tape());
             output_stream_content.set_content(state.output_log());
             input_stream_content.set_content(inputter.to_input_log());
-            memory_content.set_content(state.memory.show_1d());
+            memory_content.set_content(state.memory.show(copied_multidim));
             step_size_view.set_content(format!("{:#5}", step_size));
             cb_sink.send(Box::new(Cursive::noop)).unwrap();
         });
@@ -593,7 +598,7 @@ impl Tape {
         self.0.get(idx)
     }
 
-    fn parse<B: BufRead> (buff: B) -> io::Result<(Self, SourceMap)> {
+    fn parse<B: BufRead> (buff: B, multidim: bool) -> io::Result<(Self, SourceMap)> {
         let mut internal = vec![];
         let mut source = vec![];
         let mut map = vec![];
@@ -605,7 +610,7 @@ impl Tape {
 
             while let Some((col_no, c)) = char_stream.next() {
                 if c == '#' { break; }
-                if let Some(instr) = Instr::parse(c) {
+                if let Some(instr) = Instr::parse(c, multidim) {
                     let start_col = col_no;
                     let mut repetition = None;
                     let mut end_col = start_col + 1;
@@ -659,21 +664,25 @@ enum Instr {
     EndLoop,
     Output,
     Input,
-    Fork
+    Fork,
+    RotateUp,
+    RotateDown
 }
 
 impl Instr {
-    fn parse (c: char) -> Option<Self> {
-        match c {
-            '+' => Some(Instr::Increment),
-            '-' => Some(Instr::Decrement),
-            '>' => Some(Instr::MoveForward),
-            '<' => Some(Instr::MoveBackward),
-            '[' => Some(Instr::StartLoop),
-            ']' => Some(Instr::EndLoop),
-            '.' => Some(Instr::Output),
-            ',' => Some(Instr::Input),
-            '&' => Some(Instr::Fork),
+    fn parse (c: char, multidim: bool) -> Option<Self> {
+        match (c, multidim) {
+            ('+', _)    => Some(Instr::Increment),
+            ('-', _)    => Some(Instr::Decrement),
+            ('>', _)    => Some(Instr::MoveForward),
+            ('<', _)    => Some(Instr::MoveBackward),
+            ('[', _)    => Some(Instr::StartLoop),
+            (']', _)    => Some(Instr::EndLoop),
+            ('.', _)    => Some(Instr::Output),
+            (',', _)    => Some(Instr::Input),
+            ('&', _)    => Some(Instr::Fork),
+            ('*', true) => Some(Instr::RotateUp),
+            ('/', true) => Some(Instr::RotateDown),
             _   => None
         }
     }
@@ -703,6 +712,14 @@ impl Memory {
 
     fn get (&self, addr: &Address) -> i32 {
         mget_def(&self.0, 0, addr.clone())
+    }
+
+    fn show (&self, multidim: bool) -> String {
+        if multidim {
+            format!("{:?}", self)
+        } else {
+            self.show_1d()
+        }
     }
 
     fn show_1d (&self) -> String {
@@ -869,6 +886,8 @@ impl Thread {
             Instr::Input => { self.incr_instr(); }
             Instr::Output => { self.incr_instr(); }
             Instr::Fork => { self.incr_instr(); }
+            Instr::RotateUp => { self.direction += 1; }
+            Instr::RotateDown => { self.direction -= 1; }
         }
 
         // Save any output
