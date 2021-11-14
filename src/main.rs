@@ -3,9 +3,7 @@ use std::io;
 use std::io::{BufReader, BufRead};
 use std::fs::File;
 use std::hash::{Hash};
-use std::collections::HashSet;
 use std::thread;
-use std::time::Duration;
 use std::fmt;
 
 use std::path::PathBuf;
@@ -19,20 +17,17 @@ use cursive_aligned_view::Alignable;
 use cursive::{
     Cursive,
     XY,
-    align::HAlign,
-    event::{EventResult, Key},
-    traits::With,
     theme::{
         Style,
         ColorStyle,
         ColorType,
         Color,
         BaseColor,
-        PaletteColor::{Primary, Secondary}
+        PaletteColor::{Primary}
     },
     utils::span::SpannedString,
-    view::{View, ViewWrapper, scroll::{Scroller, ScrollStrategy}, Scrollable, Resizable},
-    views::{ScrollView, ResizedView, LinearLayout, Dialog, OnEventView, Panel, TextView, TextContent, EditView, NamedView, Button},
+    view::{View, ViewWrapper, scroll::{ScrollStrategy}, Scrollable, Resizable},
+    views::{ResizedView, LinearLayout, Panel, TextView, TextContent, EditView, NamedView, Button},
 };
 
 #[derive(Debug, StructOpt)]
@@ -80,7 +75,6 @@ impl InputLog {
 struct Inputter {
     inputs: sync::Arc<sync::RwLock<InputLog>>,
     need_input_tx: mpsc::Sender<Option<ThreadIO>>,
-    thread: thread::JoinHandle<()>
 }
 
 impl Inputter {
@@ -95,7 +89,7 @@ impl Inputter {
                 }));
         let inputs_c = inputs.clone();
 
-        let thread = thread::spawn(move || {
+        thread::spawn(move || {
             while let Ok(s) = give_input_rx.recv() {
                 match inputs_c.write() {
                     Ok(mut guard) => guard.queued.push_back(s.to_string()),
@@ -104,7 +98,7 @@ impl Inputter {
             }
         });
 
-        let inputter = Inputter { inputs, need_input_tx, thread };
+        let inputter = Inputter { inputs, need_input_tx };
         (inputter, give_input_tx, need_input_rx)
     }
 
@@ -845,10 +839,7 @@ impl Thread {
         // Calculate the memory modifying function
         let memory_edit = match instr {
             Instr::Input => {
-                let err_msg: &str = "Failed to get a line of input!";
-
-                let mut raw_inp = inputter.recv(&self);
-
+                let raw_inp = inputter.recv(&self);
                 let inp: i32 = raw_inp.trim().parse().expect("Non-number input from input!");
                 MemoryEdit::Absolute(self.memory_ptr.clone(), inp)
             },
