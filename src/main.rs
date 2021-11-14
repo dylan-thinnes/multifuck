@@ -200,7 +200,7 @@ fn main () -> io::Result<()> {
         }
 
         for (thread_id, thread) in state.threads.iter().enumerate() {
-            eprintln!("Thread {}: steps taken {}", thread_id, thread.steps_taken);
+            eprintln!("${}: #{} + #{} = #{}", thread_id, thread.started_at, thread.steps_taken, thread.curr_cycle());
         }
     } else {
         let (tx, rx) = mpsc::channel::<UICommand>();
@@ -464,7 +464,7 @@ impl State {
         let mut forks = vec![];
 
         for (thread_id, thread) in &mut self.threads.iter_mut().enumerate() {
-            match thread.step(thread_id, self.global_cycle_count, &mut self.tape, &mut self.memory, ascii_mode, inputter) {
+            match thread.step(&mut self.tape, &mut self.memory, ascii_mode, inputter) {
                 None => {},
                 Some((maybe_output, memory_edit, fork)) => {
                     at_least_one_live_thread = true;
@@ -474,7 +474,7 @@ impl State {
                     if let Some(output) = maybe_output {
                         self.outputs.push(ThreadIO {
                             thread_id,
-                            cycle: self.global_cycle_count,
+                            cycle: self.global_cycle_count + 1,
                             msg: output
                         });
                     }
@@ -486,6 +486,8 @@ impl State {
 
         for thread_id in forks {
             let mut new_thread = self.threads[thread_id].clone();
+            new_thread.id = self.threads.len();
+            new_thread.started_at = self.global_cycle_count + 1;
             new_thread.sleep();
             self.threads.push(new_thread);
         }
@@ -725,20 +727,24 @@ impl fmt::Debug for Address {
 
 #[derive(Debug, Clone)]
 struct Thread {
+    id: usize,
     instr_ptr: usize,
     memory_ptr: Address,
     direction: Direction,
     sleeping: bool,
+    started_at: usize,
     steps_taken: usize
 }
 
 impl Thread {
     fn new () -> Thread {
         Thread {
+            id: 0,
             instr_ptr: 0,
             memory_ptr: Address::new(),
             direction: 0,
             sleeping: false,
+            started_at: 0,
             steps_taken: 0
         }
     }
@@ -753,7 +759,7 @@ impl Thread {
         self.sleeping = true;
     }
 
-    fn step (&mut self, thread_id: usize, cycle: usize, tape: &Tape, curr_memory: &Memory, ascii_mode: bool, inputter: &mut Inputter) -> Option<(Option<String>, MemoryEdit, bool)> {
+    fn step (&mut self, tape: &Tape, curr_memory: &Memory, ascii_mode: bool, inputter: &mut Inputter) -> Option<(Option<String>, MemoryEdit, bool)> {
         if self.sleeping {
             self.sleeping = false;
             return Some((None, MemoryEdit::NoEdit, false));
@@ -840,7 +846,7 @@ impl Thread {
             Instr::Input => {
                 let err_msg: &str = "Failed to get a line of input!";
 
-                let mut raw_inp = inputter.recv(thread_id, cycle);
+                let mut raw_inp = inputter.recv(self.id, self.curr_cycle() + 1);
 
                 let inp: i32 = raw_inp.trim().parse().expect("Non-number input from input!");
                 MemoryEdit::Absolute(self.memory_ptr.clone(), inp)
@@ -857,6 +863,10 @@ impl Thread {
 
         self.steps_taken += 1;
         Some((output, memory_edit, will_fork))
+    }
+
+    fn curr_cycle (&self) -> usize {
+         self.started_at + self.steps_taken
     }
 }
 
