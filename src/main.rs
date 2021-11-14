@@ -85,11 +85,14 @@ fn main () -> io::Result<()> {
         let (tx, rx) = mpsc::channel::<UICommand>();
 
         let source_content = TextContent::new("");
+        let step_size_view = TextContent::new("");
         let output_stream_content = TextContent::new("");
         let input_stream_content = TextContent::new("");
         let memory_content = TextContent::new("");
 
         let step_btn_sender = tx.clone();
+        let decr_step_btn_sender = tx.clone();
+        let incr_step_btn_sender = tx.clone();
 
         let mut siv = cursive::default();
         siv.add_fullscreen_layer(
@@ -106,6 +109,12 @@ fn main () -> io::Result<()> {
                     .child(
                         LinearLayout::horizontal()
                         .child(Button::new("Next Step", move |_| { step_btn_sender.send(UICommand::Step); }))
+                        .child(TextView::new(" | Step Size: "))
+                        .child(Button::new("-", move |_| { decr_step_btn_sender.send(UICommand::DecrStepSize); }))
+                        .child(TextView::new(" "))
+                        .child(TextView::new_with_content(step_size_view.clone()))
+                        .child(TextView::new(" "))
+                        .child(Button::new("+", move |_| { incr_step_btn_sender.send(UICommand::IncrStepSize); }))
                         .align_bottom_center()
                         .fixed_height(1)
                     )
@@ -186,26 +195,46 @@ fn main () -> io::Result<()> {
 
         let copied_ascii_mode: bool = opt.ascii;
         let handle = thread::spawn(move || {
+            let mut step_size = 1;
+
             'outer: loop {
                 while let Ok(ui_command) = rx.recv() {
                     match ui_command {
                         UICommand::Repaint => {
-                            source_content.set_content(state.spanned_tape());
-                            output_stream_content.set_content(state.output_log());
-                            memory_content.set_content(format!["{:?}", state.memory]);
-                            cb_sink.send(Box::new(Cursive::noop)).unwrap();
                         },
                         UICommand::Step => {
-                            if !state.step(copied_ascii_mode) {
-                                break 'outer;
+                            for _ in 0..step_size {
+                                if !state.step(copied_ascii_mode) {
+                                    break 'outer;
+                                }
+                            }
+                        },
+                        UICommand::IncrStepSize => {
+                            step_size *= 2;
+                        },
+                        UICommand::DecrStepSize => {
+                            if step_size > 1 {
+                                step_size /= 2;
                             }
                         },
                         UICommand::Exit => {
                             break 'outer;
                         },
                     }
+
+                    source_content.set_content(state.spanned_tape());
+                    output_stream_content.set_content(state.output_log());
+                    memory_content.set_content(format!["{:?}", state.memory]);
+                    step_size_view.set_content(format!("{:#5}", step_size));
+                    cb_sink.send(Box::new(Cursive::noop)).unwrap();
                 }
             }
+
+            source_content.set_content(state.spanned_tape());
+            output_stream_content.set_content(state.output_log());
+            memory_content.set_content(format!["{:?}", state.memory]);
+            step_size_view.set_content(format!("{:#5}", step_size));
+            cb_sink.send(Box::new(Cursive::noop)).unwrap();
         });
 
         tx.send(UICommand::Repaint);
@@ -223,7 +252,9 @@ fn main () -> io::Result<()> {
 enum UICommand {
     Exit,
     Repaint,
-    Step
+    Step,
+    DecrStepSize,
+    IncrStepSize
 }
 
 #[derive(Debug)]
