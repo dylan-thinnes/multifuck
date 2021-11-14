@@ -13,6 +13,7 @@ use structopt::StructOpt;
 
 use std::sync::mpsc;
 
+use cursive_aligned_view::Alignable;
 use cursive::{
     Cursive,
     XY,
@@ -29,7 +30,7 @@ use cursive::{
     },
     utils::span::SpannedString,
     view::{View, ViewWrapper, scroll::{Scroller, ScrollStrategy}, Scrollable, Resizable},
-    views::{ScrollView, ResizedView, LinearLayout, Dialog, OnEventView, Panel, TextView, TextContent},
+    views::{ScrollView, ResizedView, LinearLayout, Dialog, OnEventView, Panel, TextView, TextContent, EditView, NamedView, Button},
 };
 
 #[derive(Debug, StructOpt)]
@@ -81,18 +82,33 @@ fn main () -> io::Result<()> {
             eprintln!("Thread {}: steps taken {}", thread_id, thread.steps_taken);
         }
     } else {
+        let (tx, rx) = mpsc::channel::<UICommand>();
+
         let source_content = TextContent::new("");
         let output_stream_content = TextContent::new("");
+        let input_stream_content = TextContent::new("");
         let memory_content = TextContent::new("");
+
+        let step_btn_sender = tx.clone();
 
         let mut siv = cursive::default();
         siv.add_fullscreen_layer(
             LinearLayout::horizontal()
             .child(
                 Panel::new(
-                    TextView::new_with_content(source_content.clone())
-                    .scrollable()
-                    .scroll_strategy(ScrollStrategy::KeepRow)
+                    LinearLayout::vertical()
+                    .child(
+                        ResizedView::with_full_height(
+                            TextView::new_with_content(source_content.clone())
+                        )
+                        .scrollable()
+                    )
+                    .child(
+                        LinearLayout::horizontal()
+                        .child(Button::new("Next Step", move |_| { step_btn_sender.send(UICommand::Step); }))
+                        .align_bottom_center()
+                        .fixed_height(1)
+                    )
                 )
                 .title("Source")
                 .percent_width((0.0, 0.5))
@@ -112,9 +128,27 @@ fn main () -> io::Result<()> {
                     )
                     .child(
                         Panel::new(
-                            TextView::new_with_content(output_stream_content.clone())
-                            .scrollable()
-                            .scroll_strategy(ScrollStrategy::StickToBottom)
+                            LinearLayout::vertical()
+                            .child(
+                                ResizedView::with_full_height(
+                                    TextView::new_with_content(input_stream_content.clone())
+                                )
+                                .scrollable()
+                                .scroll_strategy(ScrollStrategy::StickToBottom)
+                            )
+                            .child(
+                                NamedView::new("user_input_editor",
+                                    EditView::new()
+                                    .on_submit(move |cursive, s| {
+                                        let editor = cursive.find_name::<EditView>("user_input_editor");
+                                        if let Some(mut editor) = editor {
+                                            editor.set_content("");
+                                        }
+                                    })
+                                )
+                                .full_width()
+                                .fixed_height(1)
+                            )
                         )
                         .title("Input")
                         .percent_width((0.5, 1.0))
@@ -131,11 +165,8 @@ fn main () -> io::Result<()> {
         );
 
         let cb_sink = siv.cb_sink().clone();
-        let (tx, rx) = mpsc::channel::<UICommand>();
 
         let exit_sender = tx.clone();
-        let step_sender = tx.clone();
-
         siv.add_global_callback('q', move |s| {
             s.quit();
             if exit_sender.send(UICommand::Exit).is_err() {
@@ -143,6 +174,7 @@ fn main () -> io::Result<()> {
             }
         });
 
+        let step_sender = tx.clone();
         siv.add_global_callback(' ', move |_| {
             if step_sender.send(UICommand::Step).is_err() {
                 return;
