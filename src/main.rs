@@ -121,12 +121,12 @@ impl Inputter {
                 Ok(mut guard) => {
                     match guard.queued.pop_front() {
                         Some(s) => {
-                            guard.history.push(ThreadIO::from(thread, s.clone()));
+                            guard.history.push(thread.io(s.clone()));
                             break s;
                         },
                         None => {
                             if first_loop {
-                                let signal = ThreadIO::from(thread, String::from(""));
+                                let signal = ThreadIO::from(thread.io(String::from("")));
                                 self.need_input_tx.send(Some(signal));
                             }
                         }
@@ -440,14 +440,6 @@ struct ThreadIO {
 }
 
 impl ThreadIO {
-    pub fn from(thread: &Thread, msg: String) -> Self {
-        ThreadIO {
-            thread_id: thread.id,
-            cycle: thread.curr_cycle() + 1,
-            msg
-        }
-    }
-
     pub fn debug_fmt (&self) -> String {
         format!("#{}, ${}: {}", self.cycle, self.thread_id, self.msg)
     }
@@ -477,7 +469,7 @@ impl State {
                     memory_edits.push(memory_edit);
 
                     if let Some(output) = maybe_output {
-                        self.outputs.push(ThreadIO::from(&thread, output));
+                        self.outputs.push(thread.io(output));
                     }
 
                     if fork { forks.push(thread.id); }
@@ -758,6 +750,14 @@ impl Thread {
 
     fn sleep (&mut self) {
         self.sleeping = true;
+    }
+
+    fn io (&self, msg: String) -> ThreadIO {
+        ThreadIO {
+            thread_id: self.id,
+            cycle: self.curr_cycle() + 1,
+            msg
+        }
     }
 
     fn step (&mut self, tape: &Tape, curr_memory: &Memory, ascii_mode: bool, inputter: &mut Inputter) -> Option<(Option<String>, MemoryEdit, bool)> {
