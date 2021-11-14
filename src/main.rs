@@ -264,6 +264,11 @@ fn main () -> io::Result<()> {
                 memory_content.set_content(format!["{:?}", state.memory]);
                 step_size_view.set_content(format!("{:#5}", step_size));
                 cb_sink.send(Box::new(Cursive::noop)).unwrap();
+
+                // clear any commands that may have queued in the meantime
+                loop {
+                    if let Err(_) = rx.try_recv() { break; }
+                }
             }
 
             source_content.set_content(state.spanned_tape());
