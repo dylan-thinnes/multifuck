@@ -152,7 +152,7 @@ impl Inputter {
 fn main () -> io::Result<()> {
     let opt = Opt::from_args();
 
-    let f = File::open(opt.source)?;
+    let f = File::open(&opt.source)?;
     let input_program = Box::new(BufReader::new(f));
 
     let (tape, source_map) = Tape::parse(input_program, &opt)?;
@@ -674,7 +674,7 @@ enum Instr {
 }
 
 impl Instr {
-    fn parse (c: char, opt: Opt) -> Option<Self> {
+    fn parse (c: char, opt: &Opt) -> Option<Self> {
         match (c, opt.multidim, opt.threads) {
             ('+', _,    _)    => Some(Instr::Increment),
             ('-', _,    _)    => Some(Instr::Decrement),
