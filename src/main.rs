@@ -40,9 +40,9 @@ struct Opt {
     /// Inputs to give to program before reading stdin
     inputs: Vec<String>,
 
-    /// Run program with debugging window
+    /// Run program with curses interface
     #[structopt(long, short)]
-    debug: bool,
+    gui: bool,
 
     /// Output printed numbers in ASCII mode
     #[structopt(long, short)]
@@ -157,7 +157,7 @@ fn main () -> io::Result<()> {
     let (mut inputter, give_input_tx, need_input_rx) = Inputter::new(opt.inputs);
     let input_log_c = inputter.inputs.clone();
 
-    if !opt.debug {
+    if !opt.gui {
         thread::spawn(move || {
             loop {
                 let mut raw_inp = String::new();
