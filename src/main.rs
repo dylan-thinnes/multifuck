@@ -40,9 +40,13 @@ struct Opt {
     /// Inputs to give to program before reading stdin
     inputs: Vec<String>,
 
-    /// Run program with curses interface
+    /// Run program with graphical interface (uses ncurses)
     #[structopt(long, short)]
     gui: bool,
+
+    /// Print diagnostic info (only relevant in CLI-mode)
+    #[structopt(long, short)]
+    verbose: bool,
 
     /// Output printed numbers in ASCII mode
     #[structopt(long, short)]
@@ -166,23 +170,30 @@ fn main () -> io::Result<()> {
             }
         });
 
-        thread::spawn(move || {
-            loop {
-                match need_input_rx.recv() {
-                    Err(_) => break,
-                    Ok(None) => continue,
-                    Ok(Some(thread_io)) =>
-                        eprintln!("Input needed (#{}, ${}): ", thread_io.cycle, thread_io.thread_id)
+        if opt.verbose {
+            thread::spawn(move || {
+                loop {
+                    match need_input_rx.recv() {
+                        Err(_) => break,
+                        Ok(None) => continue,
+                        Ok(Some(thread_io)) =>
+                            eprintln!("Input needed (#{}, ${}): ", thread_io.cycle, thread_io.thread_id)
+                    }
                 }
-            }
-        });
+            });
+        }
 
         let mut output_idx = 0;
 
         while state.step(opt.ascii, &mut inputter) {
             for thread_io in state.outputs[output_idx..].iter() {
-                if opt.ascii {
-                    print!("{}", thread_io.stdout_fmt());
+                if !opt.verbose {
+                    let output = thread_io.stdout_fmt();
+                    if opt.ascii {
+                        print!("{}", output);
+                    } else {
+                        println!("{}", output); // only append a newline if not in ascii mode
+                    }
                 } else {
                     println!("{}", thread_io.debug_fmt());
                 }
