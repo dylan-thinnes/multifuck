@@ -1,0 +1,1 @@
+watchexec -w src/main.rs --force-poll 100 -r "cargo $@"
