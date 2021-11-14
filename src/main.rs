@@ -224,7 +224,9 @@ fn main () -> io::Result<()> {
                     )
                     .child(
                         LinearLayout::horizontal()
-                        .child(Button::new("Next Step", move |_| { step_btn_sender.send(UICommand::Step); }))
+                        .child(NamedView::new("next_step",
+                            Button::new("Next Step", move |_| { step_btn_sender.send(UICommand::Step); })
+                        ))
                         .child(TextView::new(" | Step Size: "))
                         .child(Button::new("-", move |_| { decr_step_btn_sender.send(UICommand::DecrStepSize); }))
                         .child(TextView::new(" "))
@@ -387,11 +389,19 @@ fn main () -> io::Result<()> {
         thread::spawn(move || {
             loop {
                 match need_input_rx.recv().unwrap() {
-                    None => input_needed_content.set_content(""),
+                    None => {
+                        input_needed_content.set_content("");
+                        cb_sink_need_input.send(Box::new(|siv| {
+                            siv.focus_name("next_step");
+                        }));
+                    },
                     Some(thread_io) => {
                         let text = format!("#{}, ${} needs input:", thread_io.cycle, thread_io.thread_id);
                         let spanned = SpannedString::styled(text, ColorStyle::highlight());
                         input_needed_content.set_content(spanned);
+                        cb_sink_need_input.send(Box::new(|siv| {
+                            siv.focus_name("user_input_editor");
+                        }));
                     }
                 }
 
