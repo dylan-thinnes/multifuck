@@ -66,7 +66,7 @@ fn main () -> io::Result<()> {
         global_cycle_count: 0
     };
 
-    let (need_input_tx, need_input_rx) = mpsc::channel::<()>();
+    let (need_input_tx, need_input_rx) = mpsc::channel::<bool>();
     let (give_input_tx, give_input_rx) = mpsc::channel::<String>();
 
     if !opt.debug {
@@ -78,9 +78,18 @@ fn main () -> io::Result<()> {
             }
         });
 
+        thread::spawn(move || {
+            loop {
+                let is_needed: bool = need_input_rx.recv().unwrap();
+                if is_needed {
+                    eprintln!("Input needed: ");
+                }
+            }
+        });
+
         let mut output_idx = 0;
 
-        while state.step(opt.ascii, &give_input_rx) {
+        while state.step(opt.ascii, &give_input_rx, &need_input_tx) {
             for thread_io in state.outputs[output_idx..].iter() {
                 if opt.ascii {
                     print!("{}", thread_io.stdout_fmt());
@@ -232,7 +241,7 @@ fn main () -> io::Result<()> {
                     },
                     UICommand::Step => {
                         for _ in 0..step_size {
-                            if !state.step(copied_ascii_mode, &give_input_rx) {
+                            if !state.step(copied_ascii_mode, &give_input_rx, &need_input_tx) {
                                 break;
                             }
                         }
@@ -262,6 +271,20 @@ fn main () -> io::Result<()> {
             memory_content.set_content(format!["{:?}", state.memory]);
             step_size_view.set_content(format!("{:#5}", step_size));
             cb_sink.send(Box::new(Cursive::noop)).unwrap();
+        });
+
+        let cb_sink_need_input = siv.cb_sink().clone();
+        thread::spawn(move || {
+            loop {
+                let is_needed: bool = need_input_rx.recv().unwrap();
+                if is_needed {
+                    input_stream_content.set_content("Need input!")
+                } else {
+                    input_stream_content.set_content("")
+                }
+
+                cb_sink_need_input.send(Box::new(Cursive::noop)).unwrap();
+            }
         });
 
         tx.send(UICommand::Repaint);
@@ -309,14 +332,14 @@ impl ThreadIO {
 }
 
 impl State {
-    fn step (&mut self, ascii_mode: bool, give_input_rx: &mpsc::Receiver<String>) -> bool {
+    fn step (&mut self, ascii_mode: bool, give_input_rx: &mpsc::Receiver<String>, need_input_tx: &mpsc::Sender<bool>) -> bool {
         let mut at_least_one_live_thread = false;
 
         let mut memory_edits = vec![];
         let mut forks = vec![];
 
         for (thread_id, thread) in &mut self.threads.iter_mut().enumerate() {
-            match thread.step(&mut self.tape, &mut self.memory, ascii_mode, give_input_rx) {
+            match thread.step(&mut self.tape, &mut self.memory, ascii_mode, give_input_rx, need_input_tx) {
                 None => {},
                 Some((maybe_output, memory_edit, fork)) => {
                     at_least_one_live_thread = true;
@@ -605,7 +628,7 @@ impl Thread {
         self.sleeping = true;
     }
 
-    fn step (&mut self, tape: &Tape, curr_memory: &Memory, ascii_mode: bool, give_input_rx: &mpsc::Receiver<String>) -> Option<(Option<String>, MemoryEdit, bool)> {
+    fn step (&mut self, tape: &Tape, curr_memory: &Memory, ascii_mode: bool, give_input_rx: &mpsc::Receiver<String>, need_input_tx: &mpsc::Sender<bool>) -> Option<(Option<String>, MemoryEdit, bool)> {
         if self.sleeping {
             self.sleeping = false;
             return Some((None, MemoryEdit::NoEdit, false));
@@ -690,7 +713,19 @@ impl Thread {
         // Calculate the memory modifying function
         let memory_edit = match instr {
             Instr::Input => {
-                let raw_inp = give_input_rx.recv().expect("Failed to get a line of input!");
+                let err_msg: &str = "Failed to get a line of input!";
+
+                let mut result = give_input_rx.try_recv();
+                let raw_inp = match result {
+                    Ok(s) => s,
+                    Err(mpsc::TryRecvError::Empty) => {
+                        need_input_tx.send(true);
+                        give_input_rx.recv().expect(err_msg)
+                    },
+                    Err(mpsc::TryRecvError::Disconnected) => panic!(err_msg)
+                };
+                need_input_tx.send(false);
+
                 let inp: i32 = raw_inp.trim().parse().expect("Non-number input from input!");
                 MemoryEdit::Absolute(self.memory_ptr.clone(), inp)
             },
