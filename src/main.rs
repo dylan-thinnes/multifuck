@@ -62,17 +62,18 @@ fn main () -> io::Result<()> {
         threads: vec![
             Thread::new()
         ],
-        outputs: vec![]
+        outputs: vec![],
+        global_cycle_count: 0
     };
 
     if !opt.debug {
         let mut output_idx = 0;
         while state.step(opt.ascii) {
-            for (thread_id, line) in state.outputs[output_idx..].iter() {
+            for thread_io in state.outputs[output_idx..].iter() {
                 if opt.ascii {
-                    print!("{}", line);
+                    print!("{}", thread_io.stdout_fmt());
                 } else {
-                    println!("<{}>: {}", thread_id, line);
+                    println!("{}", thread_io.debug_fmt());
                 }
             }
             output_idx = state.outputs.len();
@@ -273,7 +274,25 @@ struct State {
     memory: Memory,
     threads: Vec<Thread>,
     source_map: SourceMap,
-    outputs: Vec<(usize, String)>
+    outputs: Vec<ThreadIO>,
+    global_cycle_count: usize
+}
+
+#[derive(Debug)]
+struct ThreadIO {
+    thread_id: usize,
+    cycle: usize,
+    msg: String
+}
+
+impl ThreadIO {
+    pub fn debug_fmt (&self) -> String {
+        format!("#{}, ${}: {}", self.cycle, self.thread_id, self.msg)
+    }
+
+    pub fn stdout_fmt (&self) -> String {
+        self.msg.clone()
+    }
 }
 
 impl State {
@@ -283,7 +302,7 @@ impl State {
         let mut memory_edits = vec![];
         let mut forks = vec![];
 
-        for (idx, thread) in &mut self.threads.iter_mut().enumerate() {
+        for (thread_id, thread) in &mut self.threads.iter_mut().enumerate() {
             match thread.step(&mut self.tape, &mut self.memory, ascii_mode) {
                 None => {},
                 Some((maybe_output, memory_edit, fork)) => {
@@ -292,10 +311,14 @@ impl State {
                     memory_edits.push(memory_edit);
 
                     if let Some(output) = maybe_output {
-                        self.outputs.push((idx, output));
+                        self.outputs.push(ThreadIO {
+                            thread_id,
+                            cycle: self.global_cycle_count + 1,
+                            msg: output
+                        });
                     }
 
-                    if fork { forks.push(idx); }
+                    if fork { forks.push(thread_id); }
                 }
             }
         }
@@ -310,18 +333,18 @@ impl State {
             memory_edit.edit(&mut self.memory);
         }
 
+        if at_least_one_live_thread {
+            self.global_cycle_count += 1;
+        }
+
         at_least_one_live_thread
     }
 
     fn output_log (&self) -> SpannedString<Style> {
         let mut span = SpannedString::<Style>::plain("");
 
-        for (thread_id, line) in &self.outputs {
-            span.append_styled(
-                format!["<{}>", thread_id],
-                ColorStyle::secondary());
-            span.append_plain(": ");
-            span.append_plain(line);
+        for output in &self.outputs {
+            span.append_plain(output.debug_fmt());
             span.append_plain("\n");
         }
 
