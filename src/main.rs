@@ -188,12 +188,8 @@ fn main () -> io::Result<()> {
         while state.step(opt.ascii, &mut inputter) {
             for thread_io in state.outputs[output_idx..].iter() {
                 if !opt.verbose {
-                    let output = thread_io.stdout_fmt();
-                    if opt.ascii {
-                        print!("{}", output);
-                    } else {
-                        println!("{}", output); // only append a newline if not in ascii mode
-                    }
+                    let output = thread_io.stdout_fmt(opt.ascii);
+                    print!("{}", output);
                 } else {
                     println!("{}", thread_io.debug_fmt());
                 }
@@ -459,8 +455,8 @@ impl ThreadIO {
         format!("#{}, ${}: {}", self.cycle, self.thread_id, self.msg)
     }
 
-    pub fn stdout_fmt (&self) -> String {
-        self.msg.clone()
+    pub fn stdout_fmt (&self, ascii_mode: bool) -> String {
+        self.msg.clone() + if ascii_mode { "" } else { "\n" }
     }
 
     pub fn debug_fmt_unknown (msg: &String) -> String {
