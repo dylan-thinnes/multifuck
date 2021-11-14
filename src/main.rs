@@ -360,7 +360,7 @@ impl State {
         }
 
         for memory_edit in memory_edits {
-            memory_edit.edit(&mut self.memory, &mut self.inputter)?;
+            memory_edit.edit(&mut self.memory)?;
         }
 
         Some(at_least_one_live_thread)
@@ -726,12 +726,11 @@ impl Thread {
 enum MemoryEdit {
     Delta(Address, i32),
     Absolute(Address, i32),
-    //Input(Address),
     NoEdit
 }
 
 impl MemoryEdit {
-    fn edit(self, memory: &mut Memory, inputter: &mut Inputter) -> Option<()> {
+    fn edit(self, memory: &mut Memory) -> Option<()> {
         match self {
             MemoryEdit::Delta(addr, x) =>
                 mmod_map(memory, 0, false, addr, |y| y + x),
