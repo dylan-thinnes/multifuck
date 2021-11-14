@@ -150,7 +150,7 @@ fn main () -> io::Result<()> {
     let (tape, source_map) = Tape::parse(input_program)?;
     let mut state = State {
         tape, source_map,
-        memory: BTreeMap::new(),
+        memory: Memory::new(),
         threads: vec![
             Thread::new()
         ],
@@ -683,7 +683,19 @@ impl Instr {
 struct Address(BTreeMap<Direction, i32>);
 type Direction = i32;
 
-type Memory = BTreeMap<Address, i32>;
+struct Memory(BTreeMap<Address, i32>);
+
+impl Memory {
+    fn new () -> Self {
+        Memory(BTreeMap::new())
+    }
+}
+
+impl fmt::Debug for Memory {
+    fn fmt (&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(fmt)
+    }
+}
 
 impl Address {
     fn new () -> Address { Address(BTreeMap::new()) }
@@ -790,7 +802,7 @@ impl Thread {
                 self.incr_instr();
             },
             Instr::StartLoop => {
-                let curr_val = mget_def(curr_memory, 0, self.memory_ptr.clone());
+                let curr_val = mget_def(&curr_memory.0, 0, self.memory_ptr.clone());
                 if curr_val == 0 {
                     let mut depth = 0;
 
@@ -838,7 +850,7 @@ impl Thread {
         // Save any output
         let output = match instr {
             Instr::Output => {
-                let val = mget_def(curr_memory, 0, self.memory_ptr.clone());
+                let val = mget_def(&curr_memory.0, 0, self.memory_ptr.clone());
                 let text = if ascii_mode {
                     // TODO: Handle chars in range > 2^31 expressible by i32
                     match std::char::from_u32(val as u32) {
@@ -890,9 +902,9 @@ impl MemoryEdit {
     fn edit(self, memory: &mut Memory) -> () {
         match self {
             MemoryEdit::Delta(addr, x) =>
-                mmod_map(memory, 0, false, addr, |y| y + x),
+                mmod_map(&mut memory.0, 0, false, addr, |y| y + x),
             MemoryEdit::Absolute(addr, x) =>
-                mmod_map(memory, 0, false, addr, |_| x),
+                mmod_map(&mut memory.0, 0, false, addr, |_| x),
             MemoryEdit::NoEdit =>
                 {}
         };
