@@ -40,7 +40,10 @@ use cursive::{
 struct Opt {
     /// Brainfuck source to run, stdin if not present
     #[structopt(parse(from_os_str))]
-    input: PathBuf,
+    source: PathBuf,
+
+    /// Inputs to give to program before reading stdin
+    inputs: Vec<String>,
 
     /// Run program with debugging window
     #[structopt(long, short)]
@@ -81,14 +84,14 @@ struct Inputter {
 }
 
 impl Inputter {
-    fn new () -> (Self, mpsc::Sender<String>, mpsc::Receiver<Option<ThreadIO>>) {
+    fn new (queued_inputs: Vec<String>) -> (Self, mpsc::Sender<String>, mpsc::Receiver<Option<ThreadIO>>) {
         let (need_input_tx, need_input_rx) = mpsc::channel::<Option<ThreadIO>>();
         let (give_input_tx, give_input_rx) = mpsc::channel::<String>();
 
         let inputs =
                 sync::Arc::new(sync::RwLock::new(InputLog {
                     history: vec![],
-                    queued: VecDeque::new()
+                    queued: VecDeque::from(queued_inputs)
                 }));
         let inputs_c = inputs.clone();
 
@@ -147,7 +150,7 @@ impl Inputter {
 fn main () -> io::Result<()> {
     let opt = Opt::from_args();
 
-    let f = File::open(opt.input)?;
+    let f = File::open(opt.source)?;
     let input_program = Box::new(BufReader::new(f));
 
     let (tape, source_map) = Tape::parse(input_program)?;
@@ -161,7 +164,7 @@ fn main () -> io::Result<()> {
         global_cycle_count: 0
     };
 
-    let (mut inputter, give_input_tx, need_input_rx) = Inputter::new();
+    let (mut inputter, give_input_tx, need_input_rx) = Inputter::new(opt.inputs);
     let input_log_c = inputter.inputs.clone();
 
     if !opt.debug {
