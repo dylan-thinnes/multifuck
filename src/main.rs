@@ -193,6 +193,21 @@ fn main () -> io::Result<()> {
             }
         });
 
+        let incr_step_sender = tx.clone();
+        siv.add_global_callback('+', move |_| {
+            if incr_step_sender.send(UICommand::IncrStepSize).is_err() {
+                return;
+            }
+        });
+
+        let decr_step_sender = tx.clone();
+        siv.add_global_callback('-', move |_| {
+            if decr_step_sender.send(UICommand::DecrStepSize).is_err() {
+                return;
+            }
+        });
+
+
         let copied_ascii_mode: bool = opt.ascii;
         let handle = thread::spawn(move || {
             let mut step_size = 1;
