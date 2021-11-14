@@ -181,7 +181,8 @@ fn main () -> io::Result<()> {
                 match need_input_rx.recv() {
                     Err(_) => break,
                     Ok(None) => continue,
-                    Ok(Some(_)) => eprintln!("Input needed: ")
+                    Ok(Some(thread_io)) =>
+                        eprintln!("Input needed (#{}, ${}): ", thread_io.cycle, thread_io.thread_id)
                 }
             }
         });
