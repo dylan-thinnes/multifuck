@@ -66,9 +66,21 @@ fn main () -> io::Result<()> {
         global_cycle_count: 0
     };
 
+    let (need_input_tx, need_input_rx) = mpsc::channel::<()>();
+    let (give_input_tx, give_input_rx) = mpsc::channel::<String>();
+
     if !opt.debug {
+        thread::spawn(move || {
+            loop {
+                let mut raw_inp = String::new();
+                io::stdin().read_line(&mut raw_inp);
+                give_input_tx.send(raw_inp);
+            }
+        });
+
         let mut output_idx = 0;
-        while state.step(opt.ascii) {
+
+        while state.step(opt.ascii, &give_input_rx) {
             for thread_io in state.outputs[output_idx..].iter() {
                 if opt.ascii {
                     print!("{}", thread_io.stdout_fmt());
@@ -83,6 +95,14 @@ fn main () -> io::Result<()> {
             eprintln!("Thread {}: steps taken {}", thread_id, thread.steps_taken);
         }
     } else {
+        thread::spawn(move || {
+            loop {
+                let mut raw_inp = String::new();
+                io::stdin().read_line(&mut raw_inp);
+                give_input_tx.send(raw_inp);
+            }
+        });
+
         let (tx, rx) = mpsc::channel::<UICommand>();
 
         let source_content = TextContent::new("");
@@ -219,7 +239,7 @@ fn main () -> io::Result<()> {
                     },
                     UICommand::Step => {
                         for _ in 0..step_size {
-                            if !state.step(copied_ascii_mode) {
+                            if !state.step(copied_ascii_mode, &give_input_rx) {
                                 break;
                             }
                         }
@@ -296,14 +316,14 @@ impl ThreadIO {
 }
 
 impl State {
-    fn step (&mut self, ascii_mode: bool) -> bool {
+    fn step (&mut self, ascii_mode: bool, give_input_rx: &mpsc::Receiver<String>) -> bool {
         let mut at_least_one_live_thread = false;
 
         let mut memory_edits = vec![];
         let mut forks = vec![];
 
         for (thread_id, thread) in &mut self.threads.iter_mut().enumerate() {
-            match thread.step(&mut self.tape, &mut self.memory, ascii_mode) {
+            match thread.step(&mut self.tape, &mut self.memory, ascii_mode, give_input_rx) {
                 None => {},
                 Some((maybe_output, memory_edit, fork)) => {
                     at_least_one_live_thread = true;
@@ -592,7 +612,7 @@ impl Thread {
         self.sleeping = true;
     }
 
-    fn step (&mut self, tape: &Tape, curr_memory: &Memory, ascii_mode: bool) -> Option<(Option<String>, MemoryEdit, bool)> {
+    fn step (&mut self, tape: &Tape, curr_memory: &Memory, ascii_mode: bool, give_input_rx: &mpsc::Receiver<String>) -> Option<(Option<String>, MemoryEdit, bool)> {
         if self.sleeping {
             self.sleeping = false;
             return Some((None, MemoryEdit::NoEdit, false));
@@ -677,9 +697,8 @@ impl Thread {
         // Calculate the memory modifying function
         let memory_edit = match instr {
             Instr::Input => {
-                let mut raw_inp: String = String::new();
-                io::stdin().read_line(&mut raw_inp).expect("Failed to a line from stdin!");
-                let inp: i32 = raw_inp.trim().parse().expect("Non-number input from stdin!");
+                let raw_inp = give_input_rx.recv().expect("Failed to get a line of input!");
+                let inp: i32 = raw_inp.trim().parse().expect("Non-number input from input!");
                 MemoryEdit::Absolute(self.memory_ptr.clone(), inp)
             },
             Instr::Increment =>
