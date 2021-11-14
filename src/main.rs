@@ -11,7 +11,9 @@ use std::fmt;
 use std::path::PathBuf;
 use structopt::StructOpt;
 
+use std::sync;
 use std::sync::mpsc;
+use std::collections::VecDeque;
 
 use cursive_aligned_view::Alignable;
 use cursive::{
@@ -49,6 +51,99 @@ struct Opt {
     ascii: bool
 }
 
+struct InputLog {
+    history: Vec<ThreadIO>,
+    queued: VecDeque<String>
+}
+
+impl InputLog {
+    fn to_str (&self) -> SpannedString<Style> {
+        let mut span = SpannedString::<Style>::plain("");
+
+        for input in self.history.iter() {
+            span.append_plain(input.debug_fmt());
+            span.append_plain("\n");
+        }
+
+        for pre_input in self.queued.iter() {
+            span.append_plain(ThreadIO::debug_fmt_unknown(&pre_input));
+            span.append_plain("\n");
+        }
+
+        span
+    }
+}
+
+struct Inputter {
+    inputs: sync::Arc<sync::RwLock<InputLog>>,
+    need_input_tx: mpsc::Sender<Option<ThreadIO>>,
+    thread: thread::JoinHandle<()>
+}
+
+impl Inputter {
+    fn new () -> (Self, mpsc::Sender<String>, mpsc::Receiver<Option<ThreadIO>>) {
+        let (need_input_tx, need_input_rx) = mpsc::channel::<Option<ThreadIO>>();
+        let (give_input_tx, give_input_rx) = mpsc::channel::<String>();
+
+        let inputs =
+                sync::Arc::new(sync::RwLock::new(InputLog {
+                    history: vec![],
+                    queued: VecDeque::new()
+                }));
+        let inputs_c = inputs.clone();
+
+        let thread = thread::spawn(move || {
+            while let Ok(s) = give_input_rx.recv() {
+                match inputs_c.write() {
+                    Ok(mut guard) => guard.queued.push_back(s.to_string()),
+                    Err(_) => break
+                }
+            }
+        });
+
+        let inputter = Inputter { inputs, need_input_tx, thread };
+        (inputter, give_input_tx, need_input_rx)
+    }
+
+    fn to_input_log (&self) -> SpannedString<Style> {
+        self.inputs.read().expect("Cannot get lock on input queue!").to_str()
+    }
+
+    fn recv (&mut self, thread_id: usize, cycle: usize) -> String {
+        let mut first_loop = true;
+
+        // spin until an input is poppable
+        let output = loop {
+            match self.inputs.write() {
+                Ok(mut guard) => {
+                    match guard.queued.pop_front() {
+                        Some(s) => {
+                            guard.history.push(ThreadIO {
+                                thread_id, cycle,
+                                msg: s.clone()
+                            });
+
+                            break s;
+                        },
+                        None => {
+                            if first_loop {
+                                let signal = ThreadIO { thread_id, cycle, msg: String::from("") };
+                                self.need_input_tx.send(Some(signal));
+                            }
+                        }
+                    }
+                }
+                Err(_) => panic!("Cannot get lock on input queue!")
+            }
+
+            first_loop = false;
+        };
+
+        self.need_input_tx.send(None);
+        output
+    }
+}
+
 fn main () -> io::Result<()> {
     let opt = Opt::from_args();
 
@@ -66,8 +161,8 @@ fn main () -> io::Result<()> {
         global_cycle_count: 0
     };
 
-    let (need_input_tx, need_input_rx) = mpsc::channel::<bool>();
-    let (give_input_tx, give_input_rx) = mpsc::channel::<String>();
+    let (mut inputter, give_input_tx, need_input_rx) = Inputter::new();
+    let input_log_c = inputter.inputs.clone();
 
     if !opt.debug {
         thread::spawn(move || {
@@ -80,16 +175,17 @@ fn main () -> io::Result<()> {
 
         thread::spawn(move || {
             loop {
-                let is_needed: bool = need_input_rx.recv().unwrap();
-                if is_needed {
-                    eprintln!("Input needed: ");
+                match need_input_rx.recv() {
+                    Err(_) => break,
+                    Ok(None) => continue,
+                    Ok(Some(_)) => eprintln!("Input needed: ")
                 }
             }
         });
 
         let mut output_idx = 0;
 
-        while state.step(opt.ascii, &give_input_rx, &need_input_tx) {
+        while state.step(opt.ascii, &mut inputter) {
             for thread_io in state.outputs[output_idx..].iter() {
                 if opt.ascii {
                     print!("{}", thread_io.stdout_fmt());
@@ -110,6 +206,7 @@ fn main () -> io::Result<()> {
         let step_size_view = TextContent::new("");
         let output_stream_content = TextContent::new("");
         let input_stream_content = TextContent::new("");
+        let input_stream_content_c = input_stream_content.clone();
         let input_needed_content = TextContent::new("");
         let memory_content = TextContent::new("");
 
@@ -118,6 +215,8 @@ fn main () -> io::Result<()> {
         let incr_step_btn_sender = tx.clone();
 
         let mut siv = cursive::default();
+        let cb_sink_send_input = siv.cb_sink().clone();
+
         siv.add_fullscreen_layer(
             LinearLayout::horizontal()
             .child(
@@ -180,6 +279,11 @@ fn main () -> io::Result<()> {
                                             editor.set_content("");
                                         }
                                         give_input_tx.send(raw_inp.to_string());
+
+                                        let input_log = input_log_c.read().expect("Could not unlock input log!");
+                                        input_stream_content_c.set_content(input_log.to_str());
+
+                                        cb_sink_send_input.send(Box::new(Cursive::noop)).unwrap();
                                     })
                                 )
                                 .full_width()
@@ -245,7 +349,8 @@ fn main () -> io::Result<()> {
                     },
                     UICommand::Step => {
                         for _ in 0..step_size {
-                            if !state.step(copied_ascii_mode, &give_input_rx, &need_input_tx) {
+                            input_stream_content.set_content(inputter.to_input_log());
+                            if !state.step(copied_ascii_mode, &mut inputter) {
                                 break;
                             }
                         }
@@ -265,6 +370,7 @@ fn main () -> io::Result<()> {
 
                 source_content.set_content(state.spanned_tape());
                 output_stream_content.set_content(state.output_log());
+                input_stream_content.set_content(inputter.to_input_log());
                 memory_content.set_content(format!["{:?}", state.memory]);
                 step_size_view.set_content(format!("{:#5}", step_size));
                 cb_sink.send(Box::new(Cursive::noop)).unwrap();
@@ -277,6 +383,7 @@ fn main () -> io::Result<()> {
 
             source_content.set_content(state.spanned_tape());
             output_stream_content.set_content(state.output_log());
+            input_stream_content.set_content(inputter.to_input_log());
             memory_content.set_content(format!["{:?}", state.memory]);
             step_size_view.set_content(format!("{:#5}", step_size));
             cb_sink.send(Box::new(Cursive::noop)).unwrap();
@@ -285,11 +392,13 @@ fn main () -> io::Result<()> {
         let cb_sink_need_input = siv.cb_sink().clone();
         thread::spawn(move || {
             loop {
-                let is_needed: bool = need_input_rx.recv().unwrap();
-                if is_needed {
-                    input_needed_content.set_content("Need input!")
-                } else {
-                    input_needed_content.set_content("")
+                match need_input_rx.recv().unwrap() {
+                    None => input_needed_content.set_content(""),
+                    Some(thread_io) => {
+                        let text = format!("#{}, ${} needs input:", thread_io.cycle, thread_io.thread_id);
+                        let spanned = SpannedString::styled(text, ColorStyle::highlight());
+                        input_needed_content.set_content(spanned);
+                    }
                 }
 
                 cb_sink_need_input.send(Box::new(Cursive::noop)).unwrap();
@@ -338,17 +447,21 @@ impl ThreadIO {
     pub fn stdout_fmt (&self) -> String {
         self.msg.clone()
     }
+
+    pub fn debug_fmt_unknown (msg: &String) -> String {
+        format!("#{}, ${}: {}", "_", "_", msg)
+    }
 }
 
 impl State {
-    fn step (&mut self, ascii_mode: bool, give_input_rx: &mpsc::Receiver<String>, need_input_tx: &mpsc::Sender<bool>) -> bool {
+    fn step (&mut self, ascii_mode: bool, inputter: &mut Inputter) -> bool {
         let mut at_least_one_live_thread = false;
 
         let mut memory_edits = vec![];
         let mut forks = vec![];
 
         for (thread_id, thread) in &mut self.threads.iter_mut().enumerate() {
-            match thread.step(&mut self.tape, &mut self.memory, ascii_mode, give_input_rx, need_input_tx) {
+            match thread.step(thread_id, self.global_cycle_count, &mut self.tape, &mut self.memory, ascii_mode, inputter) {
                 None => {},
                 Some((maybe_output, memory_edit, fork)) => {
                     at_least_one_live_thread = true;
@@ -358,7 +471,7 @@ impl State {
                     if let Some(output) = maybe_output {
                         self.outputs.push(ThreadIO {
                             thread_id,
-                            cycle: self.global_cycle_count + 1,
+                            cycle: self.global_cycle_count,
                             msg: output
                         });
                     }
@@ -637,7 +750,7 @@ impl Thread {
         self.sleeping = true;
     }
 
-    fn step (&mut self, tape: &Tape, curr_memory: &Memory, ascii_mode: bool, give_input_rx: &mpsc::Receiver<String>, need_input_tx: &mpsc::Sender<bool>) -> Option<(Option<String>, MemoryEdit, bool)> {
+    fn step (&mut self, thread_id: usize, cycle: usize, tape: &Tape, curr_memory: &Memory, ascii_mode: bool, inputter: &mut Inputter) -> Option<(Option<String>, MemoryEdit, bool)> {
         if self.sleeping {
             self.sleeping = false;
             return Some((None, MemoryEdit::NoEdit, false));
@@ -724,16 +837,7 @@ impl Thread {
             Instr::Input => {
                 let err_msg: &str = "Failed to get a line of input!";
 
-                let mut result = give_input_rx.try_recv();
-                let raw_inp = match result {
-                    Ok(s) => s,
-                    Err(mpsc::TryRecvError::Empty) => {
-                        need_input_tx.send(true);
-                        give_input_rx.recv().expect(err_msg)
-                    },
-                    Err(mpsc::TryRecvError::Disconnected) => panic!(err_msg)
-                };
-                need_input_tx.send(false);
+                let mut raw_inp = inputter.recv(thread_id, cycle);
 
                 let inp: i32 = raw_inp.trim().parse().expect("Non-number input from input!");
                 MemoryEdit::Absolute(self.memory_ptr.clone(), inp)
