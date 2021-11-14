@@ -199,8 +199,8 @@ fn main () -> io::Result<()> {
             output_idx = state.outputs.len();
         }
 
-        for (thread_id, thread) in state.threads.iter().enumerate() {
-            eprintln!("${}: #{} + #{} = #{}", thread_id, thread.started_at, thread.steps_taken, thread.curr_cycle());
+        for thread in state.threads.iter() {
+            eprintln!("${}: #{} + #{} = #{}", thread.id, thread.started_at, thread.steps_taken, thread.curr_cycle());
         }
     } else {
         let (tx, rx) = mpsc::channel::<UICommand>();
@@ -463,7 +463,7 @@ impl State {
         let mut memory_edits = vec![];
         let mut forks = vec![];
 
-        for (thread_id, thread) in &mut self.threads.iter_mut().enumerate() {
+        for thread in &mut self.threads.iter_mut() {
             match thread.step(&mut self.tape, &mut self.memory, ascii_mode, inputter) {
                 None => {},
                 Some((maybe_output, memory_edit, fork)) => {
@@ -473,13 +473,13 @@ impl State {
 
                     if let Some(output) = maybe_output {
                         self.outputs.push(ThreadIO {
-                            thread_id,
+                            thread_id: thread.id,
                             cycle: self.global_cycle_count + 1,
                             msg: output
                         });
                     }
 
-                    if fork { forks.push(thread_id); }
+                    if fork { forks.push(thread.id); }
                 }
             }
         }
@@ -518,14 +518,14 @@ impl State {
         let mut output = SpannedString::<Style>::plain("");
 
         let mut thread_locations: BTreeMap<(usize, usize), usize> = BTreeMap::new();
-        for (thread_id, thread) in self.threads.iter().enumerate() {
+        for thread in self.threads.iter() {
             let instr_ptr_w_fork_offset =
                 usize::saturating_sub(thread.instr_ptr, if thread.sleeping { 1 } else { 0 });
 
             match self.source_map.map.get(instr_ptr_w_fork_offset) {
                 None => {}
                 Some(span_index) => {
-                    thread_locations.insert(*span_index, thread_id);
+                    thread_locations.insert(*span_index, thread.id);
                 }
             }
         }
