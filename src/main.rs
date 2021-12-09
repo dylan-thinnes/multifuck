@@ -307,7 +307,10 @@ fn main () -> io::Result<()> {
                     .percent_height((0.0, 0.5))
                 )
                 .child(
-                    Panel::new(TextView::new_with_content(memory_content.clone()))
+                    Panel::new(
+                        TextView::new_with_content(memory_content.clone())
+                        .scrollable()
+                    )
                     .title("Memory")
                     .percent_height((0.5, 1.0))
                 )
