@@ -510,7 +510,6 @@ impl State {
         }
 
         let coalesced_edits = MemoryEditCoalesced::combine_edits(memory_edits);
-
         let edit_input: Option<i32> =
                 if coalesced_edits.needs_input() {
                     let raw_inp = inputter.recv(self.global_cycle_count);
@@ -520,6 +519,13 @@ impl State {
                     None
                 };
         self.memory.edit(coalesced_edits, edit_input);
+
+        let mut converged_threads = vec![];
+        while let Some(mut head) = self.threads.pop() {
+            self.threads.retain(|thread| !head.try_converge(thread));
+            converged_threads.push(head);
+        }
+        self.threads = converged_threads;
 
         if at_least_one_live_thread {
             self.global_cycle_count += 1;
@@ -827,6 +833,21 @@ impl Thread {
             started_at: 0,
             steps_taken: 0
         }
+    }
+
+    fn try_converge (&mut self, other: &Thread) -> bool {
+        let convergent =
+                self.sleeping == other.sleeping
+                    && self.direction == other.direction
+                    && self.instr_ptr == other.instr_ptr
+                    && self.memory_ptr == other.memory_ptr;
+
+        if convergent {
+            self.multiplicity += other.multiplicity;
+            self.oldest_id = self.oldest_id.min(other.oldest_id);
+        }
+
+        return convergent;
     }
 
     fn incr_instr (&mut self) { self.instr_ptr += 1; }
