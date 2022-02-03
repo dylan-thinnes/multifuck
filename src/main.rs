@@ -510,7 +510,7 @@ impl State {
         }
 
         let coalesced_edits = MemoryEditCoalesced::combine_edits(memory_edits);
-        let edit_input: Option<i32> =
+        let edit_input: Option<isize> =
                 if coalesced_edits.needs_input() {
                     let raw_inp = inputter.recv(self.global_cycle_count);
                     let inp = raw_inp.trim().parse().expect("Non-number input from input!");
@@ -711,17 +711,17 @@ impl Instr {
 }
 
 #[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-struct Address(BTreeMap<Direction, i32>);
-type Direction = i32;
+struct Address(BTreeMap<Direction, isize>);
+type Direction = isize;
 
-struct Memory(BTreeMap<Address, i32>);
+struct Memory(BTreeMap<Address, isize>);
 
 impl Memory {
     fn new () -> Self {
         Memory(BTreeMap::new())
     }
 
-    fn edit (&mut self, edit: MemoryEditCoalesced, curr_input: Option<i32>) -> () {
+    fn edit (&mut self, edit: MemoryEditCoalesced, curr_input: Option<isize>) -> () {
         if edit.inputs.len() > 0 && curr_input.is_none() {
             eprintln!("WARNING: MemoryEdit requests an input, but no input provided.");
         }
@@ -737,7 +737,7 @@ impl Memory {
         }
     }
 
-    fn get (&self, addr: &Address) -> i32 {
+    fn get (&self, addr: &Address) -> isize {
         mget_def(&self.0, 0, addr.clone())
     }
 
@@ -750,7 +750,7 @@ impl Memory {
     }
 
     fn show_1d (&self) -> String {
-        let mut ordered: BTreeMap<i32, i32> = BTreeMap::new();
+        let mut ordered: BTreeMap<isize, isize> = BTreeMap::new();
         for (addr, value) in &self.0 {
             ordered.insert(*addr.0.get(&0).unwrap_or(&0), *value);
         }
@@ -812,7 +812,7 @@ impl fmt::Debug for Address {
 #[derive(Debug, Clone)]
 struct Thread {
     oldest_id: usize,
-    multiplicity: i32,
+    multiplicity: isize,
     instr_ptr: usize,
     memory_ptr: Address,
     direction: Direction,
@@ -931,7 +931,7 @@ impl Thread {
             Instr::Output => {
                 let val = mget_def(&curr_memory.0, 0, self.memory_ptr.clone());
                 let text = if ascii_mode {
-                    // TODO: Handle chars in range > 2^31 expressible by i32
+                    // TODO: Handle chars in range > 2^31 expressible by isize
                     match std::char::from_u32(val as u32) {
                         None => format!("{}", val),
                         Some(c) => format!("{}", c)
@@ -969,14 +969,14 @@ impl Thread {
 
 #[derive(Debug, Clone)]
 enum MemoryEdit {
-    Delta(Address, i32),
+    Delta(Address, isize),
     Input(Address),
     NoEdit
 }
 
 struct MemoryEditCoalesced {
     inputs: BTreeSet<Address>,
-    deltas: BTreeMap<Address, i32>,
+    deltas: BTreeMap<Address, isize>,
 }
 
 impl MemoryEditCoalesced {
@@ -992,7 +992,7 @@ impl MemoryEditCoalesced {
         for edit in edits {
             match edit {
                 MemoryEdit::Delta(addr, amt) => {
-                    let old_val: i32 = *full_edit.deltas.get(&addr).unwrap_or(&0);
+                    let old_val: isize = *full_edit.deltas.get(&addr).unwrap_or(&0);
                     full_edit.deltas.insert(addr, old_val + amt);
                 },
                 MemoryEdit::Input(addr) => {
