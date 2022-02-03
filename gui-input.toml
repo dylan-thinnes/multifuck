@@ -1,0 +1,15 @@
+[package]
+name = "rs-multifuck"
+version = "0.1.0"
+authors = ["Dylan Thinnes <dylan.thinnes@protonmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+structopt = "0.3.21"
+cursive = "0.16.3"
+cursive-aligned-view = "^0"
+crossbeam_requests = "0.3.0"
+serdebug = "1.0.5"
+serde = { version = "^1.0", features = ["derive"] }
