@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::io;
 use std::io::{BufReader, BufRead};
 use std::fs::File;
@@ -118,30 +119,27 @@ impl Inputter {
         self.inputs.read().expect("Cannot get lock on input queue!").to_str()
     }
 
-    fn recv (&mut self, thread: &Thread) -> String {
-        let mut first_loop = true;
+    fn recv (&mut self, cycle: usize) -> String {
+        let mut need_request = true;
 
         // spin until an input is poppable
         let output = loop {
             match self.inputs.write() {
                 Ok(mut guard) => {
-                    match guard.queued.pop_front() {
-                        Some(s) => {
-                            guard.history.push(thread.io(s.clone()));
-                            break s;
-                        },
-                        None => {
-                            if first_loop {
-                                let signal = ThreadIO::from(thread.io(String::from("")));
-                                self.need_input_tx.send(Some(signal));
-                            }
-                        }
+                    if let Some(s) = guard.queued.pop_front() {
+                        guard.history.push(ThreadIO::new(cycle, s.clone()));
+                        break s;
                     }
                 }
                 Err(_) => panic!("Cannot get lock on input queue!")
             }
 
-            first_loop = false;
+            if need_request {
+                let signal = ThreadIO::from(ThreadIO::new(cycle, String::from("")));
+                self.need_input_tx.send(Some(signal));
+            }
+
+            need_request = false;
         };
 
         self.need_input_tx.send(None);
@@ -185,7 +183,7 @@ fn main () -> io::Result<()> {
                         Err(_) => break,
                         Ok(None) => continue,
                         Ok(Some(thread_io)) =>
-                            eprintln!("Input needed (#{}, ${}): ", thread_io.cycle, thread_io.thread_id)
+                            eprintln!("Cycle #{}, Input needed:", thread_io.cycle)
                     }
                 }
             });
@@ -206,7 +204,7 @@ fn main () -> io::Result<()> {
         }
 
         for thread in state.threads.iter() {
-            eprintln!("${}: #{} + #{} = #{}", thread.id, thread.started_at, thread.steps_taken, thread.curr_cycle());
+            eprintln!("${} * {}: #{} + #{} = #{}", thread.oldest_id, thread.multiplicity, thread.started_at, thread.steps_taken, thread.curr_cycle());
         }
     } else {
         let (tx, rx) = mpsc::channel::<UICommand>();
@@ -415,7 +413,7 @@ fn main () -> io::Result<()> {
                         }));
                     },
                     Some(thread_io) => {
-                        let text = format!("#{}, ${} needs input:", thread_io.cycle, thread_io.thread_id);
+                        let text = format!("Cycle #{}, Input needed:", thread_io.cycle);
                         let spanned = SpannedString::styled(text, ColorStyle::highlight());
                         input_needed_content.set_content(spanned);
                         cb_sink_need_input.send(Box::new(|siv| {
@@ -457,14 +455,17 @@ struct State {
 
 #[derive(Debug)]
 struct ThreadIO {
-    thread_id: usize,
     cycle: usize,
     msg: String
 }
 
 impl ThreadIO {
+    pub fn new (cycle: usize, msg: String) -> Self {
+        ThreadIO { cycle, msg }
+    }
+
     pub fn debug_fmt (&self) -> String {
-        format!("#{}, ${}: {}", self.cycle, self.thread_id, self.msg)
+        format!("#{}: {}", self.cycle, self.msg)
     }
 
     pub fn stdout_fmt (&self, ascii_mode: bool) -> String {
@@ -483,8 +484,8 @@ impl State {
         let mut memory_edits = vec![];
         let mut forks = vec![];
 
-        for thread in &mut self.threads.iter_mut() {
-            match thread.step(&mut self.tape, &mut self.memory, ascii_mode, inputter) {
+        for (curr_idx, thread) in &mut self.threads.iter_mut().enumerate() {
+            match thread.step(&mut self.tape, &mut self.memory, ascii_mode) {
                 None => {},
                 Some((maybe_output, memory_edit, fork)) => {
                     at_least_one_live_thread = true;
@@ -492,25 +493,33 @@ impl State {
                     memory_edits.push(memory_edit);
 
                     if let Some(output) = maybe_output {
-                        self.outputs.push(thread.io(output));
+                        self.outputs.push(ThreadIO::new(self.global_cycle_count, output));
                     }
 
-                    if fork { forks.push(thread.id); }
+                    if fork { forks.push(curr_idx); }
                 }
             }
         }
 
-        for thread_id in forks {
-            let mut new_thread = self.threads[thread_id].clone();
-            new_thread.id = self.threads.len();
+        for thread_idx in forks {
+            let mut new_thread = self.threads[thread_idx].clone();
+            new_thread.oldest_id = self.threads.len();
             new_thread.started_at = self.global_cycle_count + 1;
             new_thread.sleep();
             self.threads.push(new_thread);
         }
 
-        for memory_edit in memory_edits {
-            self.memory.edit(memory_edit);
-        }
+        let coalesced_edits = MemoryEditCoalesced::combine_edits(memory_edits);
+
+        let edit_input: Option<i32> =
+                if coalesced_edits.needs_input() {
+                    let raw_inp = inputter.recv(self.global_cycle_count);
+                    let inp = raw_inp.trim().parse().expect("Non-number input from input!");
+                    Some(inp)
+                } else {
+                    None
+                };
+        self.memory.edit(coalesced_edits, edit_input);
 
         if at_least_one_live_thread {
             self.global_cycle_count += 1;
@@ -541,7 +550,7 @@ impl State {
             match self.source_map.map.get(instr_ptr_w_fork_offset) {
                 None => {}
                 Some(span_index) => {
-                    thread_locations.insert(*span_index, thread.id);
+                    thread_locations.insert(*span_index, thread.oldest_id);
                 }
             }
         }
@@ -706,15 +715,20 @@ impl Memory {
         Memory(BTreeMap::new())
     }
 
-    fn edit (&mut self, edit: MemoryEdit) -> () {
-        match edit {
-            MemoryEdit::Delta(addr, x) =>
-                mmod_map(&mut self.0, 0, false, addr, |y| y + x),
-            MemoryEdit::Absolute(addr, x) =>
-                mmod_map(&mut self.0, 0, false, addr, |_| x),
-            MemoryEdit::NoEdit =>
-                {}
-        };
+    fn edit (&mut self, edit: MemoryEditCoalesced, curr_input: Option<i32>) -> () {
+        if edit.inputs.len() > 0 && curr_input.is_none() {
+            eprintln!("WARNING: MemoryEdit requests an input, but no input provided.");
+        }
+
+        let input_for_this_cycle = curr_input.unwrap_or(0);
+        for addr in edit.inputs {
+            self.0.insert(addr, input_for_this_cycle);
+        }
+
+        for (addr, delta) in edit.deltas.iter() {
+            let old_val = self.0.get(addr).copied().unwrap_or(0);
+            self.0.insert(addr.clone(), old_val + delta);
+        }
     }
 
     fn get (&self, addr: &Address) -> i32 {
@@ -791,7 +805,8 @@ impl fmt::Debug for Address {
 
 #[derive(Debug, Clone)]
 struct Thread {
-    id: usize,
+    oldest_id: usize,
+    multiplicity: i32,
     instr_ptr: usize,
     memory_ptr: Address,
     direction: Direction,
@@ -803,7 +818,8 @@ struct Thread {
 impl Thread {
     fn new () -> Thread {
         Thread {
-            id: 0,
+            oldest_id: 0,
+            multiplicity: 1,
             instr_ptr: 0,
             memory_ptr: Address::new(),
             direction: 0,
@@ -823,15 +839,7 @@ impl Thread {
         self.sleeping = true;
     }
 
-    fn io (&self, msg: String) -> ThreadIO {
-        ThreadIO {
-            thread_id: self.id,
-            cycle: self.curr_cycle() + 1,
-            msg
-        }
-    }
-
-    fn step (&mut self, tape: &Tape, curr_memory: &Memory, ascii_mode: bool, inputter: &mut Inputter) -> Option<(Option<String>, MemoryEdit, bool)> {
+    fn step (&mut self, tape: &Tape, curr_memory: &Memory, ascii_mode: bool) -> Option<(Option<String>, MemoryEdit, bool)> {
         if self.sleeping {
             self.sleeping = false;
             return Some((None, MemoryEdit::NoEdit, false));
@@ -917,15 +925,12 @@ impl Thread {
 
         // Calculate the memory modifying function
         let memory_edit = match instr {
-            Instr::Input => {
-                let raw_inp = inputter.recv(&self);
-                let inp: i32 = raw_inp.trim().parse().expect("Non-number input from input!");
-                MemoryEdit::Absolute(self.memory_ptr.clone(), inp)
-            },
+            Instr::Input =>
+                MemoryEdit::Input(self.memory_ptr.clone()),
             Instr::Increment =>
-                MemoryEdit::Delta(self.memory_ptr.clone(), 1),
+                MemoryEdit::Delta(self.memory_ptr.clone(), self.multiplicity),
             Instr::Decrement =>
-                MemoryEdit::Delta(self.memory_ptr.clone(), -1),
+                MemoryEdit::Delta(self.memory_ptr.clone(), -self.multiplicity),
             _ =>
                 MemoryEdit::NoEdit
         };
@@ -944,8 +949,40 @@ impl Thread {
 #[derive(Debug, Clone)]
 enum MemoryEdit {
     Delta(Address, i32),
-    Absolute(Address, i32),
+    Input(Address),
     NoEdit
+}
+
+struct MemoryEditCoalesced {
+    inputs: BTreeSet<Address>,
+    deltas: BTreeMap<Address, i32>,
+}
+
+impl MemoryEditCoalesced {
+    pub fn needs_input (&self) -> bool { self.inputs.len() > 0 }
+
+    pub fn combine_edits (edits: Vec<MemoryEdit>) -> Self {
+        let mut full_edit = MemoryEditCoalesced {
+            inputs: BTreeSet::new(),
+            deltas: BTreeMap::new()
+        };
+
+        // Process inputs first
+        for edit in edits {
+            match edit {
+                MemoryEdit::Delta(addr, amt) => {
+                    let old_val: i32 = *full_edit.deltas.get(&addr).unwrap_or(&0);
+                    full_edit.deltas.insert(addr, old_val + amt);
+                },
+                MemoryEdit::Input(addr) => {
+                    full_edit.inputs.insert(addr);
+                },
+                MemoryEdit::NoEdit => {}
+            }
+        }
+
+        full_edit
+    }
 }
 
 // map utils
