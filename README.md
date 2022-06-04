@@ -2,7 +2,7 @@
 
 Brainfuck, with extensions as I think of them.
 
-## Differences from original
+## Basic Differences
 
 This interpreter is slightly different from the original brainfuck spec:
 
@@ -15,16 +15,8 @@ This interpreter is slightly different from the original brainfuck spec:
 
 ## Debug Mode
 
-This interpreter also has a visual "debug mode" for stepping through your
-brainfuck program - turn it on with `--debug`.
-
-It is incomplete and a bit buggy, so use with caution - esp. for getting input,
-the debugger only reads input on stdin, which means inputs must be piped in
-beforehand, like so:
-
-```
-echo <my_integer_input> | rs-multifuck --debug <my_program_that_reads_an_integer_input>
-```
+This interpreter also has a visual mode for stepping through your
+brainfuck program - turn it on with `--gui`.
 
 ## ASCII Mode
 
@@ -39,21 +31,6 @@ So far, there are two extensions:
 
 - Multithreading
 - Multidimensional memory
-
-### Multidimensional memory
-
-Multidimensional memory adds two instructions, `*` and `/`, which allows the
-memory pointer to access new "dimensions" on the tape.
-
-All pointers start out in dim 0, where `<` and `>` move along the x-axis in
-memory. The `*` reorients the pointer to move along dim 1, at which point `>`
-and `<` move along the y-axis. A second use of `*` would make the dim 2, at
-which point we'd move along the z-axis, and so-on to dim 4, dim 5, etc.
-
-While the `*` instruction can be said to reorient from dim n to dim n+1, the
-`/` instruction reorients from dim n to dim n-1. This means that negative
-dimensions exist in our memory, and are just as orthogonal as all the positive
-dimensions are.
 
 ### Multithreading
 
@@ -103,3 +80,18 @@ Common programs such as `[->+<]` ("move value one cell right") can be well
 accelerated by running multiple threads in tandem. Many fun examples about
 spawning many threads with certain delays, moving values more quickly, spawning
 n threads, can be found in `./examples`.
+
+### Multidimensional memory
+
+Multidimensional memory adds two instructions, `*` and `/`, which allows the
+memory pointer to access new "dimensions" on the tape.
+
+All pointers start out in dim 0, where `<` and `>` move along the x-axis in
+memory. The `*` reorients the pointer to move along dim 1, at which point `>`
+and `<` move along the y-axis. A second use of `*` would make the dim 2, at
+which point we'd move along the z-axis, and so-on to dim 4, dim 5, etc.
+
+While the `*` instruction can be said to reorient from dim n to dim n+1, the
+`/` instruction reorients from dim n to dim n-1. This means that negative
+dimensions exist in our memory, and are just as orthogonal as all the positive
+dimensions are.
