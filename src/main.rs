@@ -767,6 +767,14 @@ impl fmt::Debug for Memory {
 
 impl Address {
     fn new () -> Address { Address(BTreeMap::new()) }
+
+    fn incr (&mut self, dir: Direction) {
+        mmod_map(&mut self.0, 0, true, dir, |c| c + 1);
+    }
+
+    fn decr (&mut self, dir: Direction) {
+        mmod_map(&mut self.0, 0, true, dir, |c| c - 1);
+    }
 }
 
 impl fmt::Debug for Address {
@@ -871,11 +879,11 @@ impl Thread {
 
         match instr {
             Instr::MoveForward => {
-                mmod_map(&mut self.memory_ptr.0, 0, true, self.direction, |c| c + 1);
+                self.memory_ptr.incr(self.direction);
                 self.incr_instr();
             },
             Instr::MoveBackward => {
-                mmod_map(&mut self.memory_ptr.0, 0, true, self.direction, |c| c - 1);
+                self.memory_ptr.decr(self.direction);
                 self.incr_instr();
             },
             Instr::StartLoop => {
