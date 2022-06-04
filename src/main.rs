@@ -782,8 +782,6 @@ impl Memory {
         let end: isize = mget_def(&end.0, 0, 0);
 
         // Lookup each element in bounds
-
-        output.append_plain(format!("{:?}\n", thread_locations));
         for idx in start..=end {
             let addr = Address::new_1d(idx);
             let val = self.get(&addr);
