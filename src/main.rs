@@ -384,7 +384,7 @@ fn main () -> io::Result<()> {
                 source_content.set_content(state.spanned_tape());
                 output_stream_content.set_content(state.output_log());
                 input_stream_content.set_content(inputter.to_input_log());
-                memory_content.set_content(state.memory.show(copied_multidim));
+                memory_content.set_content(state.memory.show(copied_multidim, &state));
                 step_size_view.set_content(format!("{:#5}", step_size));
                 cb_sink.send(Box::new(Cursive::noop)).unwrap();
 
@@ -397,7 +397,7 @@ fn main () -> io::Result<()> {
             source_content.set_content(state.spanned_tape());
             output_stream_content.set_content(state.output_log());
             input_stream_content.set_content(inputter.to_input_log());
-            memory_content.set_content(state.memory.show(copied_multidim));
+            memory_content.set_content(state.memory.show(copied_multidim, &state));
             step_size_view.set_content(format!("{:#5}", step_size));
             cb_sink.send(Box::new(Cursive::noop)).unwrap();
         });
@@ -741,21 +741,72 @@ impl Memory {
         mget_def(&self.0, 0, addr.clone())
     }
 
-    fn show (&self, multidim: bool) -> String {
+    fn show (&self, multidim: bool, state: &State) -> SpannedString<Style> {
         if multidim {
-            format!("{:?}", self)
+            self.show_nd(state)
         } else {
-            self.show_1d()
+            self.show_1d(state)
         }
     }
 
-    fn show_1d (&self) -> String {
-        let mut ordered: BTreeMap<isize, isize> = BTreeMap::new();
-        for (addr, value) in &self.0 {
-            ordered.insert(*addr.0.get(&0).unwrap_or(&0), *value);
+    fn show_nd (&self, state: &State) -> SpannedString<Style> {
+        let mut output = SpannedString::<Style>::plain("");
+        output.append(format!("{:?}", self));
+        return output;
+    }
+
+    fn show_1d (&self, state: &State) -> SpannedString<Style> {
+        let mut output = SpannedString::<Style>::plain("");
+
+        // Identify threads' memory locations
+        let mut thread_locations: BTreeMap<Address, usize> = BTreeMap::new();
+        for thread in state.threads.iter() {
+            if !thread.sleeping {
+                thread_locations.insert(thread.memory_ptr.clone(), thread.oldest_id);
+            }
         }
 
-        ordered.iter().map(|(idx, val)| format!("{:#3}: {}\n", idx, val)).collect()
+        // Get start and end bounds of 1 dimensional memory
+        let mut keys = self.0.keys();
+        let start: Option<&Address> = keys.next();
+        let end: Option<&Address> = keys.next_back();
+
+        let (start, end) = match (start, end) {
+            (None, None) => return output,
+            (Some(start), None) => (start, start),
+            (None, Some(end)) => (end, end),
+            (Some(start), Some(end)) => (start, end)
+        };
+
+        let start: isize = mget_def(&start.0, 0, 0);
+        let end: isize = mget_def(&end.0, 0, 0);
+
+        // Lookup each element in bounds
+
+        output.append_plain(format!("{:?}\n", thread_locations));
+        for idx in start..=end {
+            let addr = Address::new_1d(idx);
+            let val = self.get(&addr);
+            let matching_thread = thread_locations.get(&addr);
+
+            let color = match matching_thread {
+                None => ColorStyle::primary(),
+                Some(thread_id) => {
+                    let base_color = BaseColor::from(1 + (*thread_id as u8 % 6));
+
+                    ColorStyle {
+                        front: ColorType::from(Primary),
+                        back: ColorType::from(Color::Dark(base_color))
+                    }
+                }
+            };
+
+            let s = format!("{:#3}: {}", idx, val);
+            output.append_styled(&s, color);
+            output.append_styled("\n", ColorStyle::secondary());
+        }
+
+        return output;
     }
 }
 
@@ -767,6 +818,20 @@ impl fmt::Debug for Memory {
 
 impl Address {
     fn new () -> Address { Address(BTreeMap::new()) }
+
+    fn new_1d (val: isize) -> Address {
+        let mut addr = Address::new();
+        addr.set(0, val);
+        return addr;
+    }
+
+    fn set (&mut self, dir: Direction, val: isize) {
+        mset_def(&mut self.0, 0, true, dir, val);
+    }
+
+    fn get (&self, dir: &Direction) -> isize {
+        mget_def(&self.0, 0, dir.clone())
+    }
 
     fn incr (&mut self, dir: Direction) {
         mmod_map(&mut self.0, 0, true, dir, |c| c + 1);
@@ -790,7 +855,7 @@ impl fmt::Debug for Address {
                         write!(fmt, ",")?;
                     }
 
-                    let dist = *self.0.get(&dim).unwrap_or(&0);
+                    let dist = self.get(&dim);
                     write!(fmt, "{}", dist)?;
                 }
             }
@@ -807,7 +872,7 @@ impl fmt::Debug for Address {
                         write!(fmt, ",")?;
                     }
 
-                    let dist = *self.0.get(&dim).unwrap_or(&0);
+                    let dist = self.get(&dim);
                     write!(fmt, "{}", dist)?;
                 }
             }
